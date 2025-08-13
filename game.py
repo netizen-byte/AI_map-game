@@ -46,6 +46,9 @@ class Game:
 
         self.door_cooldown = 0.0
 
+        # fog-of-war surface reused each frame
+        self.fog_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+
     # ---------- callbacks used by Enemy ----------
     def damage_player(self, amount, atk_type, pos):
         # player already has take_damage(amount, source_pos)
@@ -136,7 +139,8 @@ class Game:
         # room transition
         if self.door_cooldown <= 0:
             side = self.dungeon.find_door_transition(self.current_room, self.player.rect)
-            if side:
+            # doors remain closed while enemies are alive
+            if side and not self.enemies:
                 nxt = self.dungeon.neighbor(self.current_room, side)
                 if nxt:
                     # place just inside new room
@@ -173,3 +177,8 @@ class Game:
         for en in self.enemies:
             en.render_extras(self.screen)
         self.player.render(self.screen)
+
+        # Fog of war: dark overlay with a transparent circle around the player
+        self.fog_surface.fill((0, 0, 0, FOG_ALPHA))
+        pygame.draw.circle(self.fog_surface, (0, 0, 0, 0), self.player.rect.center, FOG_RADIUS)
+        self.screen.blit(self.fog_surface, (0, 0))
