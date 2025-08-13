@@ -16,6 +16,10 @@ FPS = 60
 DUNGEON_COLS = 3
 DUNGEON_ROWS = 3
 
+# ----- Fog of War -----
+FOG_RADIUS = 96            # radius of visible circle around player (pixels)
+FOG_ALPHA = 200            # darkness strength (0 transparent, 255 opaque)
+
 # ----- Colors (fallback drawing if you don’t use tile images) -----
 COLOR_FLOOR   = (42, 45, 60)
 COLOR_WALL    = (25, 30, 40)
