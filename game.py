@@ -1,12 +1,9 @@
 # game.py
 import pygame
-import random
 from constants import *
 from camera import Camera
 from dungeon import Dungeon
 from player import Player
-from enemy import Enemy
-from settings import ENEMY_SPAWNS, ENEMY_SPAWN_CHANCE
 
 TRANSITION_COOLDOWN = 0.25  # seconds
 
@@ -35,19 +32,11 @@ class Game:
         # sprite groups
         self.visible_sprites = pygame.sprite.LayeredUpdates()
         self.obstacle_sprites = pygame.sprite.Group()
-        self.enemies = pygame.sprite.Group()
 
         # build obstacles from current room walls
         self._rebuild_obstacles_from_room(self.current_room)
 
-        # per-room enemy storage
-        self.room_enemies: dict[tuple[int,int], list[Enemy]] = {}
-        self._ensure_room_enemies(self.current_room)
-
         self.door_cooldown = 0.0
-
-        # fog-of-war surface reused each frame
-        self.fog_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 
     # ---------- callbacks used by Enemy ----------
     def damage_player(self, amount, atk_type, pos):
@@ -71,44 +60,14 @@ class Game:
                     r = pygame.Rect(tx*TILE_SIZE, ty*TILE_SIZE, TILE_SIZE, TILE_SIZE)
                     SolidTile(self.obstacle_sprites, r)
 
-    def _ensure_room_enemies(self, room):
-        key = (room.gx, room.gy)
-        # Already initialized for this room? Re-attach live ones to groups and return.
-        if key in self.room_enemies:
-            for en in self.room_enemies[key]:
-                if en.alive():
-                    en.add(self.visible_sprites, self.enemies)
-            return self.room_enemies[key]
-
-        # Not initialized: build from settings-driven spawns (or empty if none)
-        spawns = ENEMY_SPAWNS.get(key, [])
-        created = []
-        for name, loc in spawns:
-            # roll chance to spawn (lower chance = fewer enemies)
-            if random.random() > ENEMY_SPAWN_CHANCE:
-                continue
-
-            # convert tile→px if needed
-            if isinstance(loc, tuple) and len(loc) == 3 and loc[0] == "tile":
-                _, tx, ty = loc
-                px = tx * TILE_SIZE + TILE_SIZE // 2
-                py = ty * TILE_SIZE + TILE_SIZE // 2
-            elif isinstance(loc, tuple) and len(loc) == 3 and loc[0] == "px":
-                _, px, py = loc
-            else:
-                # fallback center
-                px = ROOM_PIX_W // 2
-                py = ROOM_PIX_H // 2
-
-            created.append(
-                Enemy(name, (px, py),
-                    [self.visible_sprites, self.enemies],
-                    self.obstacle_sprites,
-                    self.damage_player, self.trigger_death_particles, self.add_exp)
-            )
-
-        self.room_enemies[key] = created
-        return created
+    def _render_health_bar(self):
+        bar_w = 100
+        bar_h = 10
+        x, y = 10, 10
+        pygame.draw.rect(self.screen, (60, 0, 0), (x, y, bar_w, bar_h))
+        ratio = self.player.hp / PLAYER_MAX_HP
+        pygame.draw.rect(self.screen, (220, 0, 0), (x, y, int(bar_w * ratio), bar_h))
+        pygame.draw.rect(self.screen, (255, 255, 255), (x, y, bar_w, bar_h), 1)
 
     # ---------- main loop ----------
     def update(self, dt: float):
@@ -117,20 +76,8 @@ class Game:
                 raise SystemExit
             self.player.handle_event(e)
 
-        # enemies decide state based on player
-        for en in list(self.enemies):
-            en.enemy_update(self.player)
-
-        # player movement (enemies only block if not i-framed)
-        solids = [en.rect for en in self.enemies if en.alive()] if self.player.iframes <= 0 else []
-        self.player.update(dt, self.current_room, solids)
-
-        # player weapon hits → damage enemies
-        hb = self.player.attack_hitbox()
-        if hb:
-            for en in list(self.enemies):
-                if en.alive() and hb.colliderect(en.rect):
-                    en.get_damage(self.player, 'weapon')
+        # player movement
+        self.player.update(dt, self.current_room)
 
         # door cooldown
         if self.door_cooldown > 0:
@@ -160,25 +107,15 @@ class Game:
                     self.current_room = nxt
                     self.current_room.visited = True
                     self._rebuild_obstacles_from_room(self.current_room)
-                    self._ensure_room_enemies(self.current_room)
+                    if self.current_room.trap and not self.current_room.trap_triggered:
+                        self.player.take_damage(TRAP_DAMAGE)
+                        self.current_room.trap_triggered = True
                     self.door_cooldown = TRANSITION_COOLDOWN
 
         # update sprites (movement/animation)
         self.visible_sprites.update()
-        for en in list(self.enemies):
-            if not en.alive():
-                self.enemies.remove(en)
 
     def render(self):
         self.current_room.draw(self.screen)
-        # draw enemy sprites
         self.visible_sprites.draw(self.screen)
-        # HUDs / extra overlays
-        for en in self.enemies:
-            en.render_extras(self.screen)
         self.player.render(self.screen)
-
-        # Fog of war: dark overlay with a transparent circle around the player
-        self.fog_surface.fill((0, 0, 0, FOG_ALPHA))
-        pygame.draw.circle(self.fog_surface, (0, 0, 0, 0), self.player.rect.center, FOG_RADIUS)
-        self.screen.blit(self.fog_surface, (0, 0))

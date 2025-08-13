@@ -13,8 +13,13 @@ SCREEN_HEIGHT = ROOM_PIX_H
 FPS = 60
 
 # Dungeon grid (rooms connected in a grid)
-DUNGEON_COLS = 3
-DUNGEON_ROWS = 3
+# Expanded to a 5x5 maze of rooms for a more intricate layout
+DUNGEON_COLS = 5
+DUNGEON_ROWS = 5
+
+# ----- Fog of War -----
+FOG_RADIUS = 96            # radius of visible circle around player (pixels)
+FOG_ALPHA = 120            # darkness strength (0 transparent, 255 opaque)
 
 # ----- Fog of War -----
 FOG_RADIUS = 96            # radius of visible circle around player (pixels)
@@ -42,6 +47,8 @@ PLAYER_MAX_STAMINA = 100
 STAMINA_COST_ATTACK = 25
 STAMINA_REGEN_PER_SEC = 20
 IFRAME_TIME = 0.6  # seconds of invulnerability after being hit
+HIT_KNOCKBACK_SPEED = 260.0  # px/sec initial knockback push
+HIT_KNOCKBACK_TIME  = 0.18   # seconds knockback decays to zero
 
 # ----- Attack System -----
 ATTACK_COOLDOWN = 0.2  # seconds between attacks - decrease for faster attacks
@@ -49,15 +56,9 @@ ATTACK_DURATION = 0.01  # how long attack animation lasts
 ATTACK_DAMAGE = 3     # base attack damage
 ATTACK_RANGE = 50      # attack reach in pixels
 
-# ----- Enemy -----
-ENEMY_CONTACT_DAMAGE = 1
-
-IFRAME_TIME = 0.8            # seconds untouchable after getting hit
-HIT_KNOCKBACK_SPEED = 260.0  # px/sec initial knockback push
-HIT_KNOCKBACK_TIME  = 0.18   # seconds knockback decays to zero
-
-# --- Enemy stats (for health bars) ---
-ENEMY_MAX_HP = 20
+# ----- Traps -----
+# Damage dealt when entering a trapped room
+TRAP_DAMAGE = 2
 
 # (future) path if you later want Tiled maps
 MAPS_PATH = "maps"
