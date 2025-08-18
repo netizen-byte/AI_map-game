@@ -1,150 +1,115 @@
-# player.py
+from __future__ import annotations
+from pathlib import Path
+from typing import Dict, List, Tuple
 import pygame
-from constants import *
-from sprite_loader import sprite_loader
+
+from constants import TILE, ANIM_FPS, PLAYER_SPEED
+
+# -------- helpers to robustly find your sprite sheets ----------
+def _load_first_existing(paths: List[str]) -> pygame.Surface:
+    """Try multiple relative paths; also fallback to sprites/ folder."""
+    for p in paths:
+        cand = Path(p)
+        if cand.exists():
+            return pygame.image.load(cand.as_posix()).convert_alpha()
+        alt = Path("sprites") / cand.name
+        if alt.exists():
+            return pygame.image.load(alt.as_posix()).convert_alpha()
+    raise FileNotFoundError(f"None of these images exist: {paths}")
+
+def _slice_strip(sheet: pygame.Surface) -> List[pygame.Surface]:
+    h = sheet.get_height()
+    frame = min(h, TILE)           # your frames are 32×32
+    count = max(1, sheet.get_width() // frame)
+    return [sheet.subsurface(pygame.Rect(i*frame, 0, frame, frame)).copy()
+            for i in range(count)] or [sheet]
+# ---------------------------------------------------------------
 
 class Player:
-    def __init__(self, x: int, y: int):
-        # collision box (sprite centered over this)
-        self.width = 20
-        self.height = 20
-        self.rect = pygame.Rect(int(x), int(y), self.width, self.height)
-        self.speed = 140.0
+    def __init__(self, spawn_xy: Tuple[int,int]) -> None:
+        candidates: Dict[str, List[str]] = {
+            "idle_down":  ["sprites/Staystill.png", "sprites/Walk_forward.png"],
+            "idle_up":    ["sprites/Stay_still_back.png", "sprites/Walk_up.png"],
+            "idle_left":  ["sprites/Stay_still_left.png", "sprites/Stay_still_left_.png", "sprites/Walk_left.png"],
+            "idle_right": ["sprites/Stay_still_right.png", "sprites/Walk_right.png"],
+            "walk_down":  ["sprites/Walk_forward.png"],
+            "walk_up":    ["sprites/Walk_up.png"],
+            "walk_left":  ["sprites/Walk_left.png"],
+            "walk_right": ["sprites/Walk_right.png"],
+        }
+        self.anim: Dict[str, List[pygame.Surface]] = {}
+        for k, opts in candidates.items():
+            self.anim[k] = _slice_strip(_load_first_existing(opts))
 
-        # stats / hurt logic
-        self.hp = PLAYER_MAX_HP
-        self.stamina = PLAYER_MAX_STAMINA
-        self.iframes = 0.0
-        self.kb_dx = 0.0
-        self.kb_dy = 0.0
-        self.kb_time = 0.0
+        self.facing = "down"
+        self.state  = "idle_down"
+        self.frame  = 0
+        self.timer  = 0.0
+        self.image  = self.anim[self.state][self.frame]
+        self.rect   = self.image.get_rect(center=spawn_xy)
+        self.vel    = pygame.Vector2(0, 0)
+        
+    def set_state(self, name: str) -> None:
+        """Force an animation immediately (used on room enter)."""
+        if name in self.anim:
+            self.state, self.facing, self.frame, self.timer = name, name.split("_")[-1], 0, 0.0
+            self.image = self.anim[name][0]
 
-        # animation
-        self.animations = sprite_loader.load_player_animations()
-        self.dir = "down"
-        self.state = "idle"   # "idle", "walk", "attack", "hit"
-        self.frame = 0
-        self.timer = 0.0
 
-    # --- input events (edge-trigger attack) ---
-    def handle_event(self, e: pygame.event.Event):
-        if e.type == pygame.KEYDOWN and e.key in (pygame.K_SPACE, pygame.K_j):
-            if self.state != "attack" and self.stamina >= STAMINA_COST_ATTACK and self.state != "hit":
-                self.state = "attack"
-                self.frame = 0
-                self.timer = 0.0
-                self.stamina -= STAMINA_COST_ATTACK
+    def teleport(self, xy: Tuple[int,int]) -> None:
+        self.rect.center = xy
 
-    def _axis_input(self) -> tuple[float, float]:
-        keys = pygame.key.get_pressed()
-        vx = float(keys[pygame.K_d] or keys[pygame.K_RIGHT]) - float(keys[pygame.K_a] or keys[pygame.K_LEFT])
-        vy = float(keys[pygame.K_s] or keys[pygame.K_DOWN])  - float(keys[pygame.K_w] or keys[pygame.K_UP])
-        if vx and vy:
-            inv = 0.70710678
-            vx *= inv; vy *= inv
-        return vx, vy
+    def _read_input(self) -> None:
+        k = pygame.key.get_pressed()
+        vx = (1 if (k[pygame.K_d] or k[pygame.K_RIGHT]) else 0) - (1 if (k[pygame.K_a] or k[pygame.K_LEFT]) else 0)
+        vy = (1 if (k[pygame.K_s] or k[pygame.K_DOWN]) else 0) - (1 if (k[pygame.K_w] or k[pygame.K_UP]) else 0)
+        self.vel.update(vx, vy)
+        if self.vel.length_squared() > 0:
+            self.vel = self.vel.normalize() * PLAYER_SPEED
+            if abs(self.vel.x) > abs(self.vel.y):
+                self.facing = "right" if self.vel.x > 0 else "left"
+            else:
+                self.facing = "down" if self.vel.y > 0 else "up"
 
-    def attack_hitbox(self) -> pygame.Rect | None:
-        if self.state != "attack":
-            return None
-        frames = self.animations.get(f"attack_{self.dir}")
-        if not frames:
-            return None
-        active = (self.frame >= 1) and (self.frame <= max(1, len(frames)-2))
-        if not active:
-            return None
-        r = self.rect; reach = 18; w = h = 18
-        if self.dir == "up":    return pygame.Rect(r.centerx - w//2, r.top - reach, w, h)
-        if self.dir == "down":  return pygame.Rect(r.centerx - w//2, r.bottom, w, h)
-        if self.dir == "left":  return pygame.Rect(r.left - reach, r.centery - h//2, w, h)
-        if self.dir == "right": return pygame.Rect(r.right, r.centery - h//2, w, h)
+    def _set_anim(self, moving: bool) -> None:
+        wanted = f"{'walk' if moving else 'idle'}_{self.facing}"
+        if wanted != self.state:
+            self.state, self.frame, self.timer = wanted, 0, 0.0
 
-    def take_damage(self, dmg: int, source_pos: tuple[int,int] | None = None):
-        if self.iframes > 0:
-            return
-        self.hp = max(0, self.hp - dmg)
-        # enter hurt state + i-frames
-        self.state = "hit"
-        self.frame = 0
-        self.timer = 0.0
-        self.iframes = IFRAME_TIME
-        # compute knockback away from source
-        if source_pos:
-            sx, sy = source_pos
-            dx = self.rect.centerx - sx
-            dy = self.rect.centery - sy
-        else:
-            dx, dy = 0.0, 1.0  # fall-back
-        # normalize
-        mag = (dx*dx + dy*dy) ** 0.5 or 1.0
-        self.kb_dx = (dx / mag) * HIT_KNOCKBACK_SPEED
-        self.kb_dy = (dy / mag) * HIT_KNOCKBACK_SPEED
-        self.kb_time = HIT_KNOCKBACK_TIME
-
-    def update(self, dt: float, room, solid_rects=()):
-        # timers/stamina
-        if self.iframes > 0: self.iframes -= dt
-        if self.state != "attack" and self.state != "hit":
-            self.stamina = min(PLAYER_MAX_STAMINA, self.stamina + STAMINA_REGEN_PER_SEC * dt)
-
-        vx, vy = self._axis_input()
-
-        # facing (locked while hit/attack so anim matches)
-        if self.state not in ("attack", "hit"):
-            if abs(vx) > abs(vy) and vx != 0:
-                self.dir = "right" if vx > 0 else "left"
-            elif vy != 0:
-                self.dir = "down" if vy > 0 else "up"
-
-        # movement:
-        #  - if 'hit': you CAN move (on top of decaying knockback), enemies won't block during i-frames
-        #  - if 'attack': movement disabled (classic feel)
-        mvx = mvy = 0
-        if self.state != "attack":
-            mvx = int(round(vx * self.speed * dt))
-            mvy = int(round(vy * self.speed * dt))
-
-        # apply knockback (decays)
-        if self.kb_time > 0:
-            k = max(0.0, self.kb_time / HIT_KNOCKBACK_TIME)
-            mvx += int(round(self.kb_dx * k * dt))
-            mvy += int(round(self.kb_dy * k * dt))
-            self.kb_time -= dt
-
-        # X then Y against walls
-        self.rect.x += mvx
-        if room.rect_collides(self.rect):
-            self.rect.x -= mvx
-        self.rect.y += mvy
-        if room.rect_collides(self.rect):
-            self.rect.y -= mvy
-
-        if self.state not in ("attack", "hit"):
-            self.state = "walk" if (vx or vy) else "idle"
-
-        # animation advance
-        key = f"{self.state}_{self.dir}"
-        frames = self.animations.get(key, self.animations.get(f"idle_{self.dir}"))
-        if not frames:
-            frames = self.animations[f"idle_{self.dir}"]
-
+    def _animate(self, dt: float) -> None:
+        frames = self.anim[self.state]
+        if len(frames) == 1:
+            self.image = frames[0]; return
         self.timer += dt
-        if self.timer >= 1.0 / ANIMATION_FPS:
-            self.timer = 0.0
-            self.frame += 1
-            if self.frame >= len(frames):
-                if self.state == "attack":
-                    self.state = "idle"
-                elif self.state == "hit":
-                    # after hurt anim finishes, go idle and keep any remaining i-frames
-                    self.state = "idle"
-                self.frame = 0
+        step = 1.0 / ANIM_FPS
+        while self.timer >= step:
+            self.timer -= step
+            self.frame = (self.frame + 1) % len(frames)
+        self.image = frames[self.frame]
 
-    def render(self, surface: pygame.Surface):
-        key = f"{self.state}_{self.dir}"
-        frames = self.animations.get(key, self.animations.get(f"idle_{self.dir}"))
-        sprite = frames[self.frame]
-        dest = sprite.get_rect(); dest.center = self.rect.center
-        surface.blit(sprite, dest)
-        # Debug: draw i-frame outline
-        # if self.iframes > 0: pygame.draw.rect(surface, (255,255,0), self.rect, 1)
+    def _move_axis(self, dx: float, dy: float, solids: List[pygame.Rect]) -> None:
+        if dx:
+            self.rect.x += int(dx)
+            for s in solids:
+                if self.rect.colliderect(s):
+                    self.rect.right = min(self.rect.right, s.left) if dx > 0 else self.rect.right
+                    self.rect.left  = max(self.rect.left,  s.right) if dx < 0 else self.rect.left
+        if dy:
+            self.rect.y += int(dy)
+            for s in solids:
+                if self.rect.colliderect(s):
+                    self.rect.bottom = min(self.rect.bottom, s.top) if dy > 0 else self.rect.bottom
+                    self.rect.top    = max(self.rect.top,    s.bottom) if dy < 0 else self.rect.top
+
+    # offset = camera/room offset; update works with world solids shifted to screen
+    def update(self, dt: float, room, offset: Tuple[int,int]=(0,0)) -> None:
+        self._read_input()
+        moving = self.vel.length_squared() > 0
+        self._set_anim(moving)
+
+        if moving:
+            solids = room.solid_rects(offset)
+            self._move_axis(self.vel.x * dt, 0, solids)
+            self._move_axis(0, self.vel.y * dt, solids)
+
+        self._animate(dt)
