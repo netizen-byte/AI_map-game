@@ -8,24 +8,42 @@ from room_map import RoomMap
 from player import Player
 
 
-class ConfirmBox:
-    """Simple Y/N modal."""
+
+class TextBox:
+    """Flexible text panel. Can be used as a simple message or a Y/N confirm.
+
+    API:
+      show(text, confirm=False, on_yes=None, on_no=None)
+
+    For compatibility the old name `ConfirmBox` is kept as an alias.
+    """
     def __init__(self, font: pygame.font.Font):
         self.font = font
         self.active = False
         self.text = ""
+        self.confirm_mode = False
         self.on_yes = None
         self.on_no = None
+        self.confirm_hint = None
 
-    def show(self, text: str, on_yes, on_no=None):
+        # visual config
+        self.bg = (24, 26, 30)
+        self.border = (110, 110, 130)
+        self.text_color = (235, 235, 240)
+        self.shadow = (6, 8, 12)
+
+    def show(self, text: str, confirm: bool = False, on_yes=None, on_no=None, confirm_hint: str | None = None):
         self.active = True
         self.text = text
+        self.confirm_mode = confirm
         self.on_yes = on_yes
         self.on_no = on_no
+        self.confirm_hint = confirm_hint
 
     def cancel(self):
         self.active = False
         self.text = ""
+        self.confirm_mode = False
         self.on_yes = None
         self.on_no = None
 
@@ -33,28 +51,72 @@ class ConfirmBox:
         if not self.active:
             return
         if ev.type == pygame.KEYDOWN:
-            if ev.key in (pygame.K_y, pygame.K_RETURN, pygame.K_e):
-                cb = self.on_yes
+            if self.confirm_mode:
+                if ev.key in (pygame.K_y, pygame.K_RETURN, pygame.K_e):
+                    cb = self.on_yes
+                    self.cancel()
+                    if cb:
+                        cb()
+                elif ev.key in (pygame.K_n, pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                    cb = self.on_no
+                    self.cancel()
+                    if cb:
+                        cb()
+            else:
                 self.cancel()
-                if cb:
-                    cb()
-            elif ev.key in (pygame.K_n, pygame.K_ESCAPE, pygame.K_BACKSPACE):
-                cb = self.on_no
-                self.cancel()
-                if cb:
-                    cb()
 
     def draw(self, screen: pygame.Surface):
         if not self.active:
             return
-        # panel
-        txt = self.font.render(self.text + "  (Y/N)", True, (230, 230, 230))
-        padding = 16
-        w, h = txt.get_width() + padding * 2, txt.get_height() + padding * 2
+
+        # render text (wrap if needed)
+        padding = 18
+        max_w = SCREEN_W - 120
+        words = self.text.split(" ")
+        lines = []
+        line = ""
+        for w in words:
+            test = (line + " " + w).strip()
+            if self.font.size(test)[0] > max_w:
+                lines.append(line)
+                line = w
+            else:
+                line = test
+        if line:
+            lines.append(line)
+
+        txt_surfs = [self.font.render(l, True, self.text_color) for l in lines]
+        w = max(s.get_width() for s in txt_surfs) + padding * 2
+        h = sum(s.get_height() for s in txt_surfs) + padding * 2
+
+        # extra room for confirm hint (small text at bottom-right)
+        hint = None
+        if self.confirm_mode:
+            hint_text = self.confirm_hint or "(Y/N)"
+            hint = self.font.render(hint_text, True, (200, 200, 210))
+            # ensure box is wide enough for the hint
+            w = max(w, hint.get_width() + padding * 2)
+            h += hint.get_height() + 8
+
         rect = pygame.Rect((SCREEN_W - w) // 2, (SCREEN_H - h) // 2, w, h)
-        pygame.draw.rect(screen, (20, 20, 24), rect)
-        pygame.draw.rect(screen, (120, 120, 140), rect, 2)
-        screen.blit(txt, (rect.x + padding, rect.y + padding))
+
+        # shadow
+        shadow_rect = rect.move(6, 6)
+        pygame.draw.rect(screen, self.shadow, shadow_rect, border_radius=10)
+        pygame.draw.rect(screen, self.bg, rect, border_radius=10)
+        pygame.draw.rect(screen, self.border, rect, 2, border_radius=10)
+
+        y = rect.y + padding
+        for s in txt_surfs:
+            screen.blit(s, (rect.x + padding, y))
+            y += s.get_height()
+
+        if self.confirm_mode and hint is not None:
+            # draw hint in a slightly dimmer color at bottom-right
+            screen.blit(hint, (rect.right - padding - hint.get_width(), rect.bottom - padding - hint.get_height()))
+
+
+ConfirmBox = TextBox
 
 
 class Game:
@@ -134,7 +196,13 @@ class Game:
             if rn not in self.rooms and (Path("maps") / rn).exists():
                 self.rooms.append(rn)
         self.confirm = ConfirmBox(self.font)
-        self.previous_room: str | None = None  # track only immediate previous room
+        self.previous_room = None  # track only immediate previous room
+        self.door_confirm_extra = ""
+        self.room_hints: dict[str, str] = {
+                "room1.json": "A quiet library. A soft light glows to the north.",
+                "room2.json": "Storage room — might be useful items here."
+        }
+        self.door_confirm_extra = "Tip: collect items before leaving."
 
     @property
     def offset(self) -> Tuple[int, int]:  # RESTORED
@@ -148,21 +216,24 @@ class Game:
         if target_room_name not in self.rooms:
             return
         is_back = (self.previous_room is not None and target_room_name == self.previous_room)
-
         self.cur = self.rooms.index(target_room_name)
+        # load room using existing player object so rect is preserved
         self.room = self.map.load_json_room(self.rooms[self.cur], player=self.player)
+        self._spawn_after_entry(target_door_index, is_back)
 
-        if is_back and self.room.back_spawn_override:
-            self.player.rect.center = self.room.get_spawn_point(prefer_back=True)
-            if hasattr(self.player, "set_state"):
-                self.player.set_state("idle_down")
-            else:
-                self.player.facing = "down"
+        # Ensure idle state after placement
+        if hasattr(self.player, "set_state"):
+            self.player.set_state("idle_down")
         else:
-            self._spawn_at_door_front(target_door_index)
+            self.player.facing = "down"
 
+        # mark previous room and set door-blocking state
         self.previous_room = source_room
         self._door_block_rect = None
+        # Prevent instant door confirm after entering. Track spawn center so
+        # we only clear the flag once the player actually moves away.
+        self.just_entered_room = True
+        self._entry_spawn_center = tuple(self.player.rect.center)
 
     def _place_player_after_enter(self, is_back: bool, door_index: int):
         # (kept for compatibility but no longer used)
@@ -180,13 +251,98 @@ class Game:
         else:
             sx, sy = self.room.get_spawn_point()
             self.player.rect.center = (sx, sy)
-        if hasattr(self.player, "set_state"):
-            self.player.set_state("idle_down")
+
+    def _spawn_at_door_inside(self, door_index: int = 0):
+        """Place player just inside (above) the given door index (used on back travel)."""
+        if 0 <= door_index < len(self.room.door_cells):
+            dx, dy = self.room.door_cells[door_index]
+            cx = int((dx + 0.5) * TILE)
+            cy_inside = int((dy - 0.5) * TILE)
+            if cy_inside < 0:
+                cy_inside = int((dy + 0.5) * TILE)
+            # Collision safety: if inside a solid, fallback to door center
+            test = self.player.rect.copy()
+            test.center = (cx, cy_inside)
+            for s in self.room.solids:
+                if test.colliderect(s):
+                    cy_inside = int((dy + 0.5) * TILE)
+                    break
+            self.player.rect.center = (cx, cy_inside)
         else:
-            self.player.facing = "down"
+            sx, sy = self.room.get_spawn_point()
+            self.player.rect.center = (sx, sy)
+
+    def _spawn_after_entry(self, door_index: int, is_back: bool):
+        """Contextual spawn handling for forward/back travel.
+
+        Forward: always spawn in front (below) door.
+        Back: if door is at bottom edge -> spawn inside (above) door.
+              if door is at top edge -> spawn in front (below) door (so player not outside).
+              otherwise fallback to inside placement.
+        Also sets a temporary _door_block_rect to avoid instant re-trigger.
+        """
+        if door_index < 0 or door_index >= len(self.room.door_cells):
+            # Fallback to generic spawn
+            sx, sy = self.room.get_spawn_point()
+            self.player.rect.center = (sx, sy)
+            return
+        dx, dy = self.room.door_cells[door_index]
+        h_tiles = self.room.pixel_size[1] // TILE
+
+        if not is_back:
+            self._spawn_at_door_front(door_index)
+        else:
+            # Place player just outside the door in the direction away from
+            # the door surface so they don't spawn overlapping the door.
+            door_rect = self.room.door_rects()[door_index]
+            pw, ph = self.player.rect.width, self.player.rect.height
+            rw, rh = self.room.pixel_size
+            placed = False
+
+            # horizontal door (top/bottom)
+            if door_rect.width >= door_rect.height:
+                if door_rect.centery < rh / 2:
+                    # top -> place below
+                    px = door_rect.centerx
+                    py = door_rect.bottom + ph // 2 + 4
+                else:
+                    # bottom -> place above
+                    px = door_rect.centerx
+                    py = door_rect.top - ph // 2 - 4
+                self.player.rect.center = (int(px), int(py))
+                placed = True
+            else:
+                # vertical door (left/right)
+                if door_rect.centerx < rw / 2:
+                    # left -> place to the right
+                    px = door_rect.right + pw // 2 + 4
+                else:
+                    # right -> place to the left
+                    px = door_rect.left - pw // 2 - 4
+                py = door_rect.centery
+                self.player.rect.center = (int(px), int(py))
+                placed = True
+
+            # Collision safety: if placed spot intersects solids or wasn't placed,
+            # fallback to the room spawn point.
+            if placed:
+                test = self.player.rect.copy()
+                if any(test.colliderect(s) for s in self.room.solids):
+                    sx, sy = self.room.get_spawn_point()
+                    self.player.rect.center = (sx, sy)
+            else:
+                sx, sy = self.room.get_spawn_point()
+                self.player.rect.center = (sx, sy)
+
+        # After spawning, block re-trigger until player steps away
+        door_rect = self.room.door_rects()[door_index]
+        self._door_block_rect = door_rect.inflate(-TILE // 4, -TILE // 4)
 
     def _check_door_trigger(self):
         if self.confirm.active:
+            return
+        # Prevent confirm dialog immediately after entering room
+        if getattr(self, "just_entered_room", False):
             return
         if self._door_block_rect and self.player.rect.colliderect(self._door_block_rect):
             return
@@ -201,8 +357,18 @@ class Game:
                 if idx not in links:
                     continue
                 target_room, target_door = links[idx]
+                # build message: per-room hint (or global extra) as main text,
+                # and a small confirm hint at bottom-right.
+                hint_main = self.room_hints.get(cur_name) or self.door_confirm_extra or ""
+                if hint_main:
+                    msg = hint_main
+                else:
+                    msg = f"You are at {cur_name}."
+                confirm_hint = f"Do you still want to go?"
                 self.confirm.show(
-                    f"Go to {target_room}?",
+                    msg,
+                    confirm=True,
+                    confirm_hint=confirm_hint,
                     on_yes=lambda tr=target_room, td=target_door, src=cur_name: self._enter_room(tr, td, src),
                     on_no=lambda r=inset: setattr(self, "_door_block_rect", r)
                 )
@@ -210,7 +376,8 @@ class Game:
 
     # ------------ main loop step ------------
     def run_step(self) -> bool:
-        # Safety: recreate confirm if missing (prevents AttributeError if __init__ was interrupted)
+        """Single frame update/render. Returns False to quit."""
+        # Safety: recreate confirm if missing
         if not hasattr(self, "confirm"):
             self.confirm = ConfirmBox(self.font)
 
@@ -221,22 +388,24 @@ class Game:
                 return False
             self.confirm.handle_event(ev)
 
-        # update only when not in modal
         if not self.confirm.active:
             self.player.update(dt, self.room)
+            # If we just entered, only clear the flag once the player has
+            # moved away from the spawn center to avoid immediate re-trigger.
+            if getattr(self, "just_entered_room", False):
+                ex, ey = getattr(self, "_entry_spawn_center", (0, 0))
+                px, py = self.player.rect.center
+                dx = px - ex
+                dy = py - ey
+                if dx * dx + dy * dy > 4:  # moved > 2 pixels
+                    self.just_entered_room = False
+                    self._entry_spawn_center = None
             self._check_door_trigger()
 
-        # draw
         self.screen.fill((18, 22, 28))
         off = self.offset
         self.room.draw(self.screen, off)
         self.screen.blit(self.player.image, self.player.rect.move(off))
         self.confirm.draw(self.screen)
-
         pygame.display.flip()
-        return True
-        pygame.display.flip()
-        return True
-        return True
-        return True
         return True
