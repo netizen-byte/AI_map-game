@@ -1,0 +1,132 @@
+from collections import deque
+
+#class for creating a Node. "Doors" can be added to every node in unique directions (door_name). For BFS, we use edges instead of costs 
+class Node:
+    def __init__(self, name):
+        self.name = name
+        self.doors = {}  
+        self.hints = {}
+
+    def add_door(self, door_name, node, edge=1, hint=""):
+        self.doors[door_name] = (node, edge)
+        self.hints[door_name] = hint
+
+    def __repr__(self):
+        return f"Node({self.name})"
+
+#class for searching the created tree.
+class BFS:
+    def __init__(self, nodes):
+        self.nodes = nodes  # nodes is a dictionary {name: Node}
+
+    def breadth_first_search(self, start, goal):
+
+        """Return shortest path (by edges) from start to goal."""
+
+        queue = deque([(start, [])])  # (current_node, path)
+        #creates a tuple that cannot be changed. First item is the starting node, and the next is a list.
+        #The list tracks all the nodes we've visited, creating a path.
+
+        visited = set() #a list containing unique items only.
+
+        while queue:
+            current, path = queue.popleft()
+
+            if current in visited:
+                #checks to see if the current node has already been visited. At first, that node is A.
+                continue
+
+            #A is being added to "visited"
+            visited.add(current)
+
+            #new path is made. [current] needs to be a list because path has been declared as a list in the above queue variable (see line 28)
+            new_path = path + [current]
+
+            #check whether the current node has neighbors
+
+            # 1. Check if goal
+            if current.name == goal.name:
+                print("GOAL FOUND at", current.name)
+                # print("Shortest path:", " -> ".join(node.name for node in new_path))
+                return new_path
+
+            # Explore neighbors
+            for door, (neighbor, _) in current.doors.items():
+                if neighbor.name not in visited:
+                    queue.append((neighbor, new_path))
+
+        print("No path found!")
+        return []
+
+    
+    def play(self, start_name, goal_name):
+        start = self.nodes[start_name]
+        goal = self.nodes[goal_name]
+
+        print(f"Starting at {start.name}, goal is {goal.name}")
+
+        current = start
+        steps_taken = 0
+
+        while current != goal:
+            print(f"\nYou are at {current.name}")
+            print("Doors available:")
+
+            for i, (door, (neighbor, cost)) in enumerate(current.doors.items()):
+                print(f" {i+1}. Door '{door}' → {neighbor.name} | Hint: {current.hints[door]}")
+
+            choice = int(input("Choose a door number: ")) - 1
+            doors_list = list(current.doors.items())
+
+            if 0 <= choice < len(doors_list):
+                door, (neighbor, _) = doors_list[choice]
+                steps_taken += 1  # each move counts as 1 step
+                current = neighbor
+
+                # BFS "hint" about shortest path by edges
+                path = self.breadth_first_search(current, goal)
+                if path:
+                    print("BFS says: Shortest path by steps is:",
+                          " → ".join([n.name for n in path]))
+                    print(f" Steps remaining: {len(path)-1}")
+                else:
+                    print("BFS says: No path from here!")
+                    print("Going Home...")
+                    #if no path is found, reset back to home node
+                    current = start
+            else:
+                print("Invalid choice!")
+
+        shortest_found_by_BFS = self.breadth_first_search(start, goal)
+        string_BFS = " → ".join([n.name for n in shortest_found_by_BFS])
+
+        print(f"\n🎉 You reached the goal {goal.name} with total steps taken {steps_taken}!")
+        print(f"The shortest path you could have taken was: {string_BFS}")
+
+
+# Example Graph Creation
+if __name__ == "__main__":
+    # Create nodes
+    A = Node("A")
+    B = Node("B")
+    C = Node("C")
+    D = Node("D")
+    E = Node("E")
+    F = Node("F")
+    G = Node("G")
+
+    # Add connections (doors)
+    A.add_door("left", B, hint="Looks safe")
+    A.add_door("right", C, hint="Dark tunnel")
+
+    B.add_door("down", D, hint="Smells fresh air")
+    C.add_door("down", G, hint="Silence...")
+
+    D.add_door("left", E, hint="This one?")
+    D.add_door("right", F, hint="Or Maybe...")
+
+    nodes = {"A": A, "B": B, "C": C, "D": D, "E": E, "F":F, "G":G}
+
+    # Play game with BFS
+    game = BFS(nodes)
+    game.play("A", "E")
