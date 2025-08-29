@@ -10,6 +10,7 @@ from constants import TILE
 # New: keys that mark a door layer (doors are walkable, but detected)
 DOOR_LAYER_KEYS = ("door", "doors")
 DECOR_LAYER_KEYS = ("decor", "decoration")
+HAZARD_LAYER_KEYS = ("lava", "trap", "hazard")
 SPAWN_LAYER_KEYS = ("player_spawn", "spawn")
 BACK_SPAWN_LAYER_KEYS = ("back_from_other_room", "return_spawn")  # lowercase for matching
 SPAWN_IDLE_ANIMS = ("Staystill", "idle_front", "idle_down", "front_idle")  # preferred idle names
@@ -44,6 +45,8 @@ class Room:
     dynamic_solids: List[pygame.Rect]  = field(default_factory=list)
     spawn_override: Tuple[int,int] | None = None  # NEW: explicit spawn point
     back_spawn_override: Tuple[int,int] | None = None  # NEW
+    hazards:     List[pygame.Rect]     = field(default_factory=list)  # NEW: hazard rects
+    bombs:       List[pygame.Rect]     = field(default_factory=list)  # NEW: bomb rects
 
     # draw pre-rendered room
     def draw(self, screen: pygame.Surface, offset: Tuple[int, int]) -> None:
@@ -52,6 +55,17 @@ class Room:
     # door rectangles (world coords; shift by offset for screen coords)
     def door_rects(self, offset: Tuple[int,int]|None=None) -> List[pygame.Rect]:
         rects = [pygame.Rect(x*TILE, y*TILE, TILE, TILE) for x,y in self.door_cells]
+        if offset is None: return rects
+        ox, oy = offset; return [r.move(-ox, -oy) for r in rects]
+
+    # hazard rectangles similar to doors
+    def hazard_rects(self, offset: Tuple[int,int]|None=None) -> List[pygame.Rect]:
+        rects = [pygame.Rect(r.x, r.y, r.w, r.h) for r in self.hazards]
+        if offset is None: return rects
+        ox, oy = offset; return [r.move(-ox, -oy) for r in rects]
+
+    def bomb_rects(self, offset: Tuple[int,int]|None=None) -> List[pygame.Rect]:
+        rects = [pygame.Rect(r.x, r.y, r.w, r.h) for r in self.bombs]
         if offset is None: return rects
         ox, oy = offset; return [r.move(-ox, -oy) for r in rects]
 
@@ -122,6 +136,8 @@ class RoomMap:
         atlases: list[pygame.Surface|None] = []
         bases:    list[int] = []
         ts_defs   = data.get("tilesets", [])
+        # Build helper map: global gid -> per-tile image filename (for image collection tilesets)
+        gid_to_image: dict[int, str] = {}
         for ts in ts_defs:
             bases.append(ts["firstgid"])
             atlas_path: Path|None = None
@@ -170,6 +186,15 @@ class RoomMap:
             else:
                 atlases.append(None)  # missing image is fine; we just don't blit
 
+            # Map individual tile images if present
+            for tile_def in ts.get("tiles", []) or []:
+                local_id = tile_def.get("id")
+                img = tile_def.get("image")
+                if local_id is None or not img:
+                    continue
+                global_gid = ts["firstgid"] + local_id
+                gid_to_image[global_gid] = Path(img).name
+
         # quick helper to pick atlas by gid
         def pick_atlas(gid: int):
             idx = max(i for i, base in enumerate(bases) if gid >= base)
@@ -183,7 +208,9 @@ class RoomMap:
         spawn_cells: list[tuple[int,int]] = []  # NEW
         back_spawn_cells: list[tuple[int,int]] = []  # NEW
         object_solids: list[pygame.Rect] = []  # moved: now for all rooms
+        hazards: list[pygame.Rect] = []       # NEW
 
+        bombs: list[pygame.Rect] = []
         for layer in data["layers"]:
             ltype = layer.get("type")
             if ltype == "tilelayer":
@@ -225,10 +252,26 @@ class RoomMap:
                     elif any(k in lname for k in DECOR_LAYER_KEYS):
                         # Decor now always walkable -> skip adding to solids
                         pass
+                    elif any(k in lname for k in HAZARD_LAYER_KEYS):
+                        # Treat hazard tiles as walkable but damaging; store rects
+                        hazards.append(pygame.Rect(x*tw, y*th, tw, th))
                     elif "wall" in lname or "solid" in lname:
                         solid_cells.append((x, y))
                     else:
                         pass
+
+                    # Additional classification by source image name
+                    img_name = (gid_to_image.get(gid) or "").lower()
+                    atlas_img = Path(ts_defs[atlas_i].get("image", "")).name.lower() if atlas_i is not None else ""
+                    # Only classify by filename for image-collection tiles where we know exact file names
+                    if img_name:
+                        if img_name in ("lava.png", "volcanoe_tiles.png"):
+                            hazards.append(pygame.Rect(x*tw, y*th, tw, th))
+                        if img_name in ("icon41.png",):
+                            rect_full = pygame.Rect(x*tw, y*th, tw, th)
+                            hazards.append(rect_full)
+                            bombs.append(rect_full.inflate(-6, -6))
+                            
 
             elif ltype == "objectgroup":
                 lname = layer.get("name", "").lower()
@@ -242,6 +285,15 @@ class RoomMap:
                         r = pygame.Rect(int(x), int(y), int(w), int(h))
                         if r.width and r.height:
                             object_solids.append(r)
+                        gid = obj.get("gid")
+                        if gid:
+                            img = gid_to_image.get(gid, "").lower()
+                            if img.endswith("39.png") or img.endswith("40.png") or img.endswith("lamp.png") or img == "lava.png" or img == "volcanoe_tiles.png":
+                                hazards.append(r.copy())
+                            if img == "icon41.png":
+                                hazards.append(r.copy())
+                                bombs.append(r.inflate(-6, -6))
+                                
 
         door_set = set(door_cells)
 
@@ -270,7 +322,9 @@ class RoomMap:
             door_cells=door_cells,
             solids=solids,
             spawn_override=spawn_override,
-            back_spawn_override=back_spawn_override  # NEW
+            back_spawn_override=back_spawn_override,  # NEW
+            hazards=hazards,
+            bombs=bombs
         )
         self.current_room = room  # NEW: track for dynamic solid updates
         if player is not None:

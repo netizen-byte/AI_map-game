@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 import pygame
-from constants import SCREEN_W, SCREEN_H, FPS, TILE
+from constants import SCREEN_W, SCREEN_H, FPS, TILE, PLAYER_MAX_HP, HAZARD_DAMAGE, HAZARD_TICK_SECONDS
 from room_map import RoomMap
 from player import Player
 
@@ -203,6 +203,10 @@ class Game:
                 "room2.json": "Storage room — might be useful items here."
         }
         self.door_confirm_extra = "Tip: collect items before leaving."
+        # hazards
+        self._hazard_tick_accum = 0.0
+        # game over state
+        self.game_over = False
 
     @property
     def offset(self) -> Tuple[int, int]:  # RESTORED
@@ -386,9 +390,15 @@ class Game:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 return False
-            self.confirm.handle_event(ev)
+            if self.game_over:
+                if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    self._restart()
+                if ev.type == pygame.MOUSEBUTTONDOWN:
+                    self._handle_restart_click()
+            else:
+                self.confirm.handle_event(ev)
 
-        if not self.confirm.active:
+        if not self.confirm.active and not self.game_over:
             self.player.update(dt, self.room)
             # If we just entered, only clear the flag once the player has
             # moved away from the spawn center to avoid immediate re-trigger.
@@ -401,11 +411,121 @@ class Game:
                     self.just_entered_room = False
                     self._entry_spawn_center = None
             self._check_door_trigger()
+            self._apply_hazard_damage(dt)
+            self._check_bomb_trigger()
 
         self.screen.fill((18, 22, 28))
         off = self.offset
         self.room.draw(self.screen, off)
         self.screen.blit(self.player.image, self.player.rect.move(off))
+        self._draw_bomb_effect(off)
+        self._draw_health_bar()
         self.confirm.draw(self.screen)
+        # delayed game over after death anim
+        if hasattr(self, '_death_time') and self._death_time is not None and not self.game_over:
+            self._death_time -= dt
+            if self._death_time <= 0:
+                self._trigger_game_over()
+                self._death_time = None
+        if self.game_over:
+            self._draw_game_over()
         pygame.display.flip()
         return True
+
+    def _start_death_sequence(self, delay: float = 0.6):
+        self._death_time = max(0.2, delay)
+
+    # ------------- hazards -------------
+    def _apply_hazard_damage(self, dt: float):
+        self._hazard_tick_accum += dt
+        if self._hazard_tick_accum < HAZARD_TICK_SECONDS:
+            return
+        self._hazard_tick_accum = 0.0
+        for r in self.room.hazard_rects():
+            if self.player.hitbox.colliderect(r):
+                self.player.take_damage(HAZARD_DAMAGE)
+                self.player.hurt_from(r.center)
+                if self.player.hp <= 0:
+                    self._start_death_sequence()
+                break
+
+    def _check_bomb_trigger(self):
+        if not hasattr(self.room, 'bomb_rects'):
+            return
+        for r in self.room.bomb_rects():
+            if self.player.hitbox.colliderect(r):
+                self._explode_bomb(r.center)
+                break
+
+    def _explode_bomb(self, center: tuple[int,int]):
+        # load smoke frames if available
+        self._bomb_frames = []
+        for i in range(0, 10):
+            for cand in (f"particles/smoke/{i}.png", f"particles/smoke/{i}.webp"):
+                p = Path(cand)
+                if p.exists():
+                    try:
+                        self._bomb_frames.append(pygame.image.load(p.as_posix()).convert_alpha())
+                    except Exception:
+                        pass
+                    break
+        self._bomb_center = center
+        self._bomb_index = 0
+        # instakill with short delay
+        self.player.kill_instant()
+        self._start_death_sequence()
+
+    def _draw_bomb_effect(self, off: tuple[int,int]):
+        if not getattr(self, '_bomb_frames', None):
+            return
+        if self._bomb_index < len(self._bomb_frames):
+            img = self._bomb_frames[self._bomb_index]
+            pos = (self._bomb_center[0] + off[0] - img.get_width()//2,
+                   self._bomb_center[1] + off[1] - img.get_height()//2)
+            self.screen.blit(img, pos)
+            self._bomb_index += 1
+
+    # ------------- health bar -------------
+    def _draw_health_bar(self):
+        max_w = 160
+        h = 16
+        x, y = 20, 20
+        ratio = max(0.0, min(1.0, self.player.hp / max(1, self.player.max_hp)))
+        cur_w = int(max_w * ratio)
+        pygame.draw.rect(self.screen, (40, 40, 52), pygame.Rect(x-2, y-2, max_w+4, h+4), border_radius=6)
+        pygame.draw.rect(self.screen, (210, 50, 60), pygame.Rect(x, y, cur_w, h), border_radius=4)
+        pygame.draw.rect(self.screen, (230, 230, 240), pygame.Rect(x, y, max_w, h), 2, border_radius=4)
+
+    # ------------- game over -------------
+    def _trigger_game_over(self):
+        self.game_over = True
+
+    def _restart(self):
+        # reload current room and reset player
+        cur_name = self.rooms[self.cur]
+        self.player.heal_full()
+        self.room = self.map.load_json_room(cur_name, player=self.player)
+        self.just_entered_room = False
+        self.game_over = False
+
+    def _draw_game_over(self):
+        surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        surf.fill((0, 0, 0, 160))
+        self.screen.blit(surf, (0, 0))
+        big = pygame.font.Font(None, 56)
+        small = self.font
+        t1 = big.render("Game Over", True, (255, 230, 230))
+        t2 = small.render("Press Enter or Click Play Again", True, (240, 240, 255))
+        btn = pygame.Rect(0, 0, 220, 40)
+        btn.center = (SCREEN_W//2, SCREEN_H//2 + 60)
+        pygame.draw.rect(self.screen, (250, 210, 60), btn, border_radius=8)
+        label = self.font.render("Play Again", True, (30, 30, 30))
+        self.screen.blit(t1, (SCREEN_W//2 - t1.get_width()//2, SCREEN_H//2 - 80))
+        self.screen.blit(t2, (SCREEN_W//2 - t2.get_width()//2, SCREEN_H//2 - 30))
+        self.screen.blit(label, (btn.centerx - label.get_width()//2, btn.centery - label.get_height()//2))
+        self._restart_btn = btn
+
+    def _handle_restart_click(self):
+        pos = pygame.mouse.get_pos()
+        if hasattr(self, "_restart_btn") and self._restart_btn.collidepoint(pos):
+            self._restart()

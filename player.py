@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import pygame
 
-from constants import TILE, ANIM_FPS, PLAYER_SPEED
+from constants import TILE, ANIM_FPS, PLAYER_SPEED, PLAYER_MAX_HP
 
 # -------- helpers to robustly find your sprite sheets ----------
 def _load_first_existing(paths: List[str]) -> pygame.Surface:
@@ -47,7 +47,20 @@ class Player:
         self.timer  = 0.0
         self.image  = self.anim[self.state][self.frame]
         self.rect   = self.image.get_rect(center=spawn_xy)
+        # smaller hitbox used for hazard checks (not movement)
+        self.hitbox = self.rect.inflate(-8, -8)
         self.vel    = pygame.Vector2(0, 0)
+        # health
+        self.max_hp = PLAYER_MAX_HP
+        self.hp = PLAYER_MAX_HP
+        self.invuln_timer = 0.0  # used for brief hit flash if desired
+        self.hurt_timer = 0.0
+        self.dead = False
+
+        # optional extra animations
+        if Path("sprites/Die.png").exists():
+            self.anim["dead"] = _slice_strip(pygame.image.load("sprites/Die.png").convert_alpha())
+        # fallback hurt animation uses idle frame flash (no extra art needed)
         
     def set_state(self, name: str) -> None:
         """Force an animation immediately (used on room enter)."""
@@ -61,6 +74,8 @@ class Player:
 
     def _read_input(self) -> None:
         k = pygame.key.get_pressed()
+        if self.hurt_timer > 0 or self.dead:
+            return
         vx = (1 if (k[pygame.K_d] or k[pygame.K_RIGHT]) else 0) - (1 if (k[pygame.K_a] or k[pygame.K_LEFT]) else 0)
         vy = (1 if (k[pygame.K_s] or k[pygame.K_DOWN]) else 0) - (1 if (k[pygame.K_w] or k[pygame.K_UP]) else 0)
         self.vel.update(vx, vy)
@@ -72,7 +87,12 @@ class Player:
                 self.facing = "down" if self.vel.y > 0 else "up"
 
     def _set_anim(self, moving: bool) -> None:
-        wanted = f"{'walk' if moving else 'idle'}_{self.facing}"
+        if self.dead:
+            wanted = "dead" if "dead" in self.anim else f"idle_{self.facing}"
+        elif self.hurt_timer > 0:
+            wanted = f"idle_{self.facing}"
+        else:
+            wanted = f"{'walk' if moving else 'idle'}_{self.facing}"
         if wanted != self.state:
             self.state, self.frame, self.timer = wanted, 0, 0.0
 
@@ -107,9 +127,49 @@ class Player:
         moving = self.vel.length_squared() > 0
         self._set_anim(moving)
 
-        if moving:
+        if moving and not self.dead:
             solids = room.solid_rects(offset)
             self._move_axis(self.vel.x * dt, 0, solids)
             self._move_axis(0, self.vel.y * dt, solids)
 
         self._animate(dt)
+        if self.invuln_timer > 0:
+            self.invuln_timer = max(0.0, self.invuln_timer - dt)
+        if self.hurt_timer > 0:
+            self.hurt_timer = max(0.0, self.hurt_timer - dt)
+            # apply knockback decay
+            self.rect.x += int(self.vel.x * dt)
+            self.rect.y += int(self.vel.y * dt)
+            self.vel *= 0.88
+        # keep hitbox centered on rect
+        self.hitbox.center = self.rect.center
+
+    def heal_full(self) -> None:
+        self.hp = self.max_hp
+
+    def take_damage(self, amount: int) -> None:
+        if amount <= 0:
+            return
+        self.hp = max(0, self.hp - amount)
+        self.invuln_timer = 0.2
+
+    def hurt_from(self, source_pos: Tuple[int,int], knockback: float=180.0, duration: float=0.18) -> None:
+        if self.dead:
+            return
+        sx, sy = source_pos
+        dx = self.rect.centerx - sx
+        dy = self.rect.centery - sy
+        v = pygame.Vector2(dx, dy)
+        if v.length_squared() == 0:
+            v = pygame.Vector2(0, 1)
+        else:
+            v = v.normalize()
+        self.vel = v * knockback
+        self.hurt_timer = duration
+
+    def kill_instant(self) -> None:
+        self.hp = 0
+        self.dead = True
+        self.state = "dead" if "dead" in self.anim else self.state
+        self.frame = 0
+        self.timer = 0.0
