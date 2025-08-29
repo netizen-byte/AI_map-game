@@ -374,8 +374,6 @@ class Game:
 
     # ------------ main loop step ------------
     def run_step(self) -> bool:
-        """Single frame update/render. Returns False to quit."""
-        # Safety: recreate confirm if missing
         if not hasattr(self, "confirm"):
             self.confirm = ConfirmBox(self.font)
 
@@ -386,9 +384,10 @@ class Game:
                 return False
             if self.game_over:
                 if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    self._restart()
-                if ev.type == pygame.MOUSEBUTTONDOWN:
+                    self._restart_to_room1()
+                elif ev.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_restart_click()
+                continue
             else:
                 self.confirm.handle_event(ev)
 
@@ -441,7 +440,9 @@ class Game:
             if self.player.hitbox.colliderect(r):
                 self.player.take_damage(HAZARD_DAMAGE)
                 self.player.hurt_from(r.center)
-                if self.player.hp <= 0:
+                if self.player.hp <= 0 and not self.player.dead:
+                    if hasattr(self.player, "kill_instant"):
+                        self.player.kill_instant()
                     self._start_death_sequence()
                 break
 
@@ -497,12 +498,28 @@ class Game:
         self.game_over = True
 
     def _restart(self):
-        # reload current room and reset player
         cur_name = self.rooms[self.cur]
+        try:
+            self.player.dead = False
+            self.player.invuln_timer = 0.0
+            self.player.hurt_timer = 0.0
+            self.player.vel.update(0, 0)
+        except Exception:
+            pass
         self.player.heal_full()
+        self._hazard_tick_accum = 0.0
+        if hasattr(self, "_death_time"):
+            self._death_time = None
+        if hasattr(self, "_bomb_frames"):
+            self._bomb_frames = []
+            self._bomb_index = 0
         self.room = self.map.load_json_room(cur_name, player=self.player)
         self.just_entered_room = False
         self.game_over = False
+        if hasattr(self, "confirm"):
+            self.confirm.cancel()
+        if hasattr(self, "_restart_btn"):
+            delattr(self, "_restart_btn")
 
     def _draw_game_over(self):
         surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
@@ -524,7 +541,7 @@ class Game:
     def _handle_restart_click(self):
         pos = pygame.mouse.get_pos()
         if hasattr(self, "_restart_btn") and self._restart_btn.collidepoint(pos):
-            self._restart()
+            self._restart_to_room1()
 
     # ------------- debug overlays -------------
     def _draw_door_id_overlay(self, off: tuple[int,int]):
@@ -537,3 +554,11 @@ class Game:
                 self.screen.blit(tag, (dr.x + 2, dr.y + 2))
         except Exception:
             pass
+            self._restart_to_room1()
+
+    def _restart_to_room1(self):
+        try:
+            pygame.event.clear()
+        except Exception:
+            pass
+        self.__init__(self.screen, room_json="room1.json")

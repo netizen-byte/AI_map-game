@@ -103,11 +103,16 @@ class Player:
         frames = self.anim[self.state]
         if len(frames) == 1:
             self.image = frames[0]; return
+
         self.timer += dt
         step = 1.0 / ANIM_FPS
         while self.timer >= step:
             self.timer -= step
-            self.frame = (self.frame + 1) % len(frames)
+            if self.state == "dead":
+                if self.frame < len(frames) - 1:
+                    self.frame += 1
+            else:
+                self.frame = (self.frame + 1) % len(frames)
         self.image = frames[self.frame]
 
     def _move_axis(self, dx: float, dy: float, solids: List[pygame.Rect]) -> None:
@@ -169,6 +174,10 @@ class Player:
     def kill_instant(self) -> None:
         self.hp = 0
         self.dead = True
-        self.state = "dead" if "dead" in self.anim else self.state
+        self.invuln_timer = 0.0
+        self.hurt_timer   = 0.0
+        self.vel.update(0, 0)
+        if "dead" in self.anim:
+            self.state = "dead"
         self.frame = 0
         self.timer = 0.0
