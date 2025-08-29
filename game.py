@@ -1,22 +1,14 @@
 import random
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import pygame
-from constants import SCREEN_W, SCREEN_H, FPS, TILE, PLAYER_MAX_HP, HAZARD_DAMAGE, HAZARD_TICK_SECONDS
+from constants import SCREEN_W, SCREEN_H, FPS, TILE, HAZARD_DAMAGE, HAZARD_TICK_SECONDS
 from room_map import RoomMap
 from player import Player
 
 
-
 class TextBox:
-    """Flexible text panel. Can be used as a simple message or a Y/N confirm.
-
-    API:
-      show(text, confirm=False, on_yes=None, on_no=None)
-
-    For compatibility the old name `ConfirmBox` is kept as an alias.
-    """
     def __init__(self, font: pygame.font.Font):
         self.font = font
         self.active = False
@@ -25,14 +17,12 @@ class TextBox:
         self.on_yes = None
         self.on_no = None
         self.confirm_hint = None
+        self.bg = (24,26,30)
+        self.border = (110,110,130)
+        self.text_color = (235,235,240)
+        self.shadow = (6,8,12)
 
-        # visual config
-        self.bg = (24, 26, 30)
-        self.border = (110, 110, 130)
-        self.text_color = (235, 235, 240)
-        self.shadow = (6, 8, 12)
-
-    def show(self, text: str, confirm: bool = False, on_yes=None, on_no=None, confirm_hint: str | None = None):
+    def show(self, text: str, confirm: bool=False, on_yes=None, on_no=None, confirm_hint: str|None=None):
         self.active = True
         self.text = text
         self.confirm_mode = confirm
@@ -48,71 +38,49 @@ class TextBox:
         self.on_no = None
 
     def handle_event(self, ev: pygame.event.Event):
-        if not self.active:
-            return
+        if not self.active: return
         if ev.type == pygame.KEYDOWN:
             if self.confirm_mode:
                 if ev.key in (pygame.K_y, pygame.K_RETURN, pygame.K_e):
-                    cb = self.on_yes
-                    self.cancel()
-                    if cb:
-                        cb()
+                    cb = self.on_yes; self.cancel(); cb and cb()
                 elif ev.key in (pygame.K_n, pygame.K_ESCAPE, pygame.K_BACKSPACE):
-                    cb = self.on_no
-                    self.cancel()
-                    if cb:
-                        cb()
+                    cb = self.on_no; self.cancel(); cb and cb()
             else:
                 self.cancel()
 
     def draw(self, screen: pygame.Surface):
-        if not self.active:
-            return
-
-        # render text (wrap if needed)
+        if not self.active: return
         padding = 18
         max_w = SCREEN_W - 120
-        words = self.text.split(" ")
-        lines = []
+        words = self.text.split()
+        lines: list[str] = []
         line = ""
         for w in words:
             test = (line + " " + w).strip()
             if self.font.size(test)[0] > max_w:
-                lines.append(line)
+                if line:
+                    lines.append(line)
                 line = w
             else:
                 line = test
-        if line:
-            lines.append(line)
-
+        if line: lines.append(line)
         txt_surfs = [self.font.render(l, True, self.text_color) for l in lines]
-        w = max(s.get_width() for s in txt_surfs) + padding * 2
-        h = sum(s.get_height() for s in txt_surfs) + padding * 2
-
-        # extra room for confirm hint (small text at bottom-right)
+        w = max(s.get_width() for s in txt_surfs) + padding*2
+        h = sum(s.get_height() for s in txt_surfs) + padding*2
         hint = None
         if self.confirm_mode:
-            hint_text = self.confirm_hint or "(Y/N)"
-            hint = self.font.render(hint_text, True, (200, 200, 210))
-            # ensure box is wide enough for the hint
-            w = max(w, hint.get_width() + padding * 2)
+            hint = self.font.render(self.confirm_hint or "(Y/N)", True, (200,200,210))
+            w = max(w, hint.get_width() + padding*2)
             h += hint.get_height() + 8
-
-        rect = pygame.Rect((SCREEN_W - w) // 2, (SCREEN_H - h) // 2, w, h)
-
-        # shadow
-        shadow_rect = rect.move(6, 6)
-        pygame.draw.rect(screen, self.shadow, shadow_rect, border_radius=10)
+        rect = pygame.Rect((SCREEN_W-w)//2, (SCREEN_H-h)//2, w, h)
+        shadow = rect.move(6,6)
+        pygame.draw.rect(screen, self.shadow, shadow, border_radius=10)
         pygame.draw.rect(screen, self.bg, rect, border_radius=10)
         pygame.draw.rect(screen, self.border, rect, 2, border_radius=10)
-
         y = rect.y + padding
         for s in txt_surfs:
-            screen.blit(s, (rect.x + padding, y))
-            y += s.get_height()
-
-        if self.confirm_mode and hint is not None:
-            # draw hint in a slightly dimmer color at bottom-right
+            screen.blit(s, (rect.x+padding, y)); y += s.get_height()
+        if self.confirm_mode and hint:
             screen.blit(hint, (rect.right - padding - hint.get_width(), rect.bottom - padding - hint.get_height()))
 
 
@@ -120,98 +88,115 @@ ConfirmBox = TextBox
 
 
 class Game:
-    def __init__(self, screen: pygame.Surface, room_json: str = "room1.json"):
+    def __init__(self, screen: pygame.Surface, room_json: str="room1.json"):
         self.screen = screen
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 28)
-
         self.map = RoomMap("maps", "sprites_en")
-
-        # available rooms (use only those that exist)
-        candidates = ["room1.json", "room2.json", "room3.json"]
-        self.rooms: List[str] = [r for r in candidates if (Path("maps") / r).exists()]
-        if not self.rooms:
-            self.rooms = [room_json]
-
+        candidates = ["room1.json","room2.json","room3.json"]
+        self.rooms: List[str] = [r for r in candidates if (Path("maps")/r).exists()] or [room_json]
         self.cur = 0
         self.room = self.map.load_json_room(self.rooms[self.cur])
-        
-
-        # player at room's spawn
-        spawn_x, spawn_y = self.room.get_spawn_point()
-        self.player = Player((spawn_x, spawn_y))
-        # New: track a door rect the player must leave after declining
+        sx, sy = self.room.get_spawn_point()
+        self.player = Player((sx, sy))
         self._door_block_rect: pygame.Rect | None = None
-        # Door connection graph: current_room -> { local_door_index: (target_room, target_door_index) }
+        # Door graph (forward links only; reverse links auto-added below).
+        # NOTE: User mapping (1-based door numbers in request -> 0-based here):
+
         self.door_graph: dict[str, dict[int, tuple[str,int]]] = {
-            "room2.json": {
-                0: ("room1.json", 0),  # top-left door → room1 door 0
-                1: ("room5.json", 0),  # bottom-left door → room5 door 0
-                2: ("room3.json", 0),  # bottom-right door → room3 door 0
-            },
             "room1.json": { 0: ("room2.json", 0) },
-            "room5.json": { 0: ("room2.json", 1) },
-            # room3 now has a second (bottom-right) door → room4
-            "room3.json": {
-                0: ("room2.json", 2),
-                1: ("room4.json", 0),   # forward to room4
-            },
-            # room4 door index 1 (right side) → room6
-            "room4.json": {
-                1: ("room6.json", 0),   # forward to room6
-            },
-            "room6.json": {
-                1: ("room7.json", 0),          # door2 (index1) -> room7 door1(index0 human)
-            },
-            "room7.json": {
-                1: ("room8.json", 1),          # door2 -> room8 door2
-                2: ("room11.json", 2),         # door3 -> room11 door3
-            },
-            "room8.json": {
-                0: ("room9.json", 2),          # UPDATED: top-left door -> room9 top-right door
-            },
-            "room9.json": {
-                1: ("room10.json", 0),         # unchanged
-                2: ("room8.json", 0),          # NEW explicit reverse: top-right door -> room8 top-left
-            },
-            "room10.json": {
-                0: ("room9.json", 1),
-                1: ("room11.json", 0),
-            },
-            "room11.json": {
-                1: ("room12.json", 0),
-            },
-            "room12.json": {
-                # empty; reverse links will populate
-            },
+            "room2.json": { 1: ("room5.json", 0), 2: ("room3.json", 0) },
+            "room3.json": { 1: ("room4.json", 0) },
+            "room4.json": { 1: ("room6.json", 0) },
+            "room5.json": {},  # reverse from room2 will fill door0
+            "room6.json": { 1: ("room7.json", 0) },
+            "room7.json": { 1: ("room8.json", 1), 2: ("room11.json", 2) },
+            "room8.json": { 0: ("room9.json", 0) },
+            "room9.json": { 1: ("room10.json", 1) },
+            "room10.json": { 0: ("room11.json", 0) },
+            "room11.json": { 1: ("room12.json", 0) },
+            "room12.json": {},
         }
-        # Auto-add reverse links (door B → door A) if missing
-        for src_room, mapping in list(self.door_graph.items()):
-            for local_idx, (dst_room, dst_idx) in list(mapping.items()):
-                rev_map = self.door_graph.setdefault(dst_room, {})
-                if dst_idx not in rev_map:
-                    rev_map[dst_idx] = (src_room, local_idx)
-        # Ensure mapped rooms exist in self.rooms
-        for rn in {n for m in self.door_graph.values() for (n, _) in m.values()}:
-            if rn not in self.rooms and (Path("maps") / rn).exists():
+        for src, mapping in list(self.door_graph.items()):
+            for local_i,(dst,dst_i) in list(mapping.items()):
+                rev = self.door_graph.setdefault(dst, {})
+                rev.setdefault(dst_i, (src, local_i))
+        self._verify_door_graph()
+        self._report_unconnected_doors()
+        for rn in {n for m in self.door_graph.values() for (n,_) in m.values()}:
+            if rn not in self.rooms and (Path("maps")/rn).exists():
                 self.rooms.append(rn)
         self.confirm = ConfirmBox(self.font)
-        self.previous_room = None  # track only immediate previous room
-        self.door_confirm_extra = ""
-        self.room_hints: dict[str, str] = {
-                "room1.json": "A quiet library. A soft light glows to the north.",
-                "room2.json": "Storage room — might be useful items here."
-        }
+        self.previous_room = None
         self.door_confirm_extra = "Tip: collect items before leaving."
-        # hazards
+        self.room_hints = {
+            "room1.json": "A quiet library. A soft light glows to the north.",
+            "room2.json": "Storage room — might be useful items here.",
+        }
         self._hazard_tick_accum = 0.0
-        # game over state
         self.game_over = False
+        self.show_door_ids = True
 
     @property
-    def offset(self) -> Tuple[int, int]:  # RESTORED
+    def offset(self) -> Tuple[int,int]:
         rw, rh = self.room.pixel_size
-        return (SCREEN_W - rw) // 2, (SCREEN_H - rh) // 2
+        return (SCREEN_W - rw)//2, (SCREEN_H - rh)//2
+
+    # ------------- door graph helpers -------------
+    def connect_doors(self, room_a: str, idx_a: int, room_b: str, idx_b: int, two_way: bool=True):
+        a = self.door_graph.setdefault(room_a, {})
+        a[idx_a] = (room_b, idx_b)
+        if two_way:
+            b = self.door_graph.setdefault(room_b, {})
+            b[idx_b] = (room_a, idx_a)
+        self._verify_door_graph()
+
+    def _verify_door_graph(self):
+        for room, mapping in self.door_graph.items():
+            seen = set()
+            for li,(dst,dst_i) in mapping.items():
+                key = (dst,dst_i)
+                if key in seen:
+                    print(f"[DoorGraph] WARNING duplicate target {dst}:{dst_i} from {room}")
+                else:
+                    seen.add(key)
+
+    def _report_unconnected_doors(self):
+        """Load each room and report any door indices without a link after reverse fill.
+        Exception: room12 bottom door (allowed to be open end)."""
+        for room_name in list(self.door_graph.keys()):
+            try:
+                rm = self.map.load_json_room(room_name)
+            except Exception:
+                continue
+            door_count = len(rm.door_cells)
+            if door_count == 0:
+                continue
+            mapped = set(self.door_graph.get(room_name, {}).keys())
+            missing = [i for i in range(door_count) if i not in mapped]
+            if not missing:
+                continue
+            # Allow one unconnected bottom door in room12
+            if room_name == "room12.json":
+                # Determine bottom door indices (y == max y among doors)
+                if len(missing) == 1:
+                    max_y = max(y for _,y in rm.door_cells)
+                    idx = missing[0]
+                    dx, dy = rm.door_cells[idx]
+                    if dy == max_y:
+                        # allowed
+                        continue
+                # else fall through and report
+            print(f"[DoorGraph] Unconnected doors in {room_name}: {missing} (0-based indices). Provide targets if needed.")
+
+    def debug_list_room_doors(self, room_name: str):
+        try:
+            tmp = self.map.load_json_room(room_name)
+            print(f"[Doors] {room_name} indices:")
+            for i,(x,y) in enumerate(tmp.door_cells):
+                print(f"  {i}: tile=({x},{y}) pixel=({int((x+0.5)*TILE)},{int((y+0.5)*TILE)})")
+        except Exception as e:
+            print("[Doors] error", e)
 
     # ------------ flow ------------
     def _enter_room(self, target_room_name: str, target_door_index: int, source_room: str):
@@ -244,13 +229,21 @@ class Game:
         pass
 
     def _spawn_at_door_front(self, door_index: int = 0):
-        """Place player in front (below) the given door index."""
+        """Place player in front of the given door index (inside the room)."""
         if 0 <= door_index < len(self.room.door_cells):
             dx, dy = self.room.door_cells[door_index]
             cx = int((dx + 0.5) * TILE)
-            cy_front = int((dy + 1.5) * TILE)
-            if cy_front >= self.room.pixel_size[1]:
+            # Check if door is at bottom edge - spawn above it instead of below
+            room_height_tiles = self.room.pixel_size[1] // TILE
+            if dy >= room_height_tiles - 1:  # Door is at bottom
+                cy_front = int((dy - 0.5) * TILE)  # Spawn above door
+            else:
+                cy_front = int((dy + 1.5) * TILE)  # Spawn below door
+            # Safety check
+            if cy_front < 0:
                 cy_front = int((dy + 0.5) * TILE)
+            elif cy_front >= self.room.pixel_size[1]:
+                cy_front = int((dy - 0.5) * TILE)
             self.player.rect.center = (cx, cy_front)
         else:
             sx, sy = self.room.get_spawn_point()
@@ -294,6 +287,7 @@ class Game:
         h_tiles = self.room.pixel_size[1] // TILE
 
         if not is_back:
+            # For forward travel, spawn in front of the door
             self._spawn_at_door_front(door_index)
         else:
             # Place player just outside the door in the direction away from
@@ -306,11 +300,11 @@ class Game:
             # horizontal door (top/bottom)
             if door_rect.width >= door_rect.height:
                 if door_rect.centery < rh / 2:
-                    # top -> place below
+                    # top door -> place below (inside room)
                     px = door_rect.centerx
                     py = door_rect.bottom + ph // 2 + 4
                 else:
-                    # bottom -> place above
+                    # bottom door -> place above (inside room)
                     px = door_rect.centerx
                     py = door_rect.top - ph // 2 - 4
                 self.player.rect.center = (int(px), int(py))
@@ -418,6 +412,8 @@ class Game:
         off = self.offset
         self.room.draw(self.screen, off)
         self.screen.blit(self.player.image, self.player.rect.move(off))
+        if self.show_door_ids:
+            self._draw_door_id_overlay(off)
         self._draw_bomb_effect(off)
         self._draw_health_bar()
         self.confirm.draw(self.screen)
@@ -529,3 +525,15 @@ class Game:
         pos = pygame.mouse.get_pos()
         if hasattr(self, "_restart_btn") and self._restart_btn.collidepoint(pos):
             self._restart()
+
+    # ------------- debug overlays -------------
+    def _draw_door_id_overlay(self, off: tuple[int,int]):
+        try:
+            small = pygame.font.Font(None, 20)
+            for i, r in enumerate(self.room.door_rects()):
+                tag = small.render(str(i), True, (255, 255, 0))
+                dr = r.move(off)
+                pygame.draw.rect(self.screen, (255, 255, 0), dr, 1)
+                self.screen.blit(tag, (dr.x + 2, dr.y + 2))
+        except Exception:
+            pass
