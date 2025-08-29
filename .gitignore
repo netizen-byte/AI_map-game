@@ -1,5 +1,5 @@
 # # Python
-# __pycache__/
+__pycache__/
 # *.pyc
 # *.pyo
 # *.pyd
@@ -19,9 +19,11 @@
 # *.egg-info/
 # .installed.cfg
 # *.egg
+venv/
+
 
 # # IDE
-# .vscode/
+.vscode/
 # .idea/
 # *.swp
 # *.swo

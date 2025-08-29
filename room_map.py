@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import pygame
-from constants import TILE
+from constants import TILE, HAZARD_GIDS
 
 # New: keys that mark a door layer (doors are walkable, but detected)
 DOOR_LAYER_KEYS = ("door", "doors")
@@ -245,16 +245,17 @@ class RoomMap:
                                   pygame.Rect(sx, sy, ltw, lth))
 
                     # logic classification
+                    tile_rect = pygame.Rect(x*tw, y*th, tw, th)
                     if self._is(name, "floor"):
                         floor_cells.append((x, y))
                     elif any(k in lname for k in DOOR_LAYER_KEYS):
                         door_cells.append((x, y))
+                    elif gid in HAZARD_GIDS:                           # <-- NEW: works even if on "Decor"
+                        hazards.append(tile_rect)
+                    elif any(k in lname for k in HAZARD_LAYER_KEYS):   # layer named "trap/lava/hazard"
+                        hazards.append(tile_rect)
                     elif any(k in lname for k in DECOR_LAYER_KEYS):
-                        # Decor now always walkable -> skip adding to solids
-                        pass
-                    elif any(k in lname for k in HAZARD_LAYER_KEYS):
-                        # Treat hazard tiles as walkable but damaging; store rects
-                        hazards.append(pygame.Rect(x*tw, y*th, tw, th))
+                        pass                                           # still walkable, but not harmful unless GID matched above
                     elif "wall" in lname or "solid" in lname:
                         solid_cells.append((x, y))
                     else:

@@ -57,6 +57,9 @@ class Player:
         self.hurt_timer = 0.0
         self.dead = False
 
+        if Path("sprites/Hurt.png").exists():
+            self.anim["hurt"] = _slice_strip(pygame.image.load("sprites/Hurt.png").convert_alpha())
+
         # optional extra animations
         if Path("sprites/Die.png").exists():
             self.anim["dead"] = _slice_strip(pygame.image.load("sprites/Die.png").convert_alpha())
@@ -90,7 +93,7 @@ class Player:
         if self.dead:
             wanted = "dead" if "dead" in self.anim else f"idle_{self.facing}"
         elif self.hurt_timer > 0:
-            wanted = f"idle_{self.facing}"
+            wanted = "hurt" if "hurt" in self.anim else f"idle_{self.facing}"
         else:
             wanted = f"{'walk' if moving else 'idle'}_{self.facing}"
         if wanted != self.state:
@@ -153,17 +156,13 @@ class Player:
         self.hp = max(0, self.hp - amount)
         self.invuln_timer = 0.2
 
-    def hurt_from(self, source_pos: Tuple[int,int], knockback: float=180.0, duration: float=0.18) -> None:
-        if self.dead:
-            return
+    def hurt_from(self, source_pos, knockback: float=None, duration: float=0.18) -> None:
+        if self.dead: return
         sx, sy = source_pos
-        dx = self.rect.centerx - sx
-        dy = self.rect.centery - sy
-        v = pygame.Vector2(dx, dy)
-        if v.length_squared() == 0:
-            v = pygame.Vector2(0, 1)
-        else:
-            v = v.normalize()
+        v = pygame.Vector2(self.rect.centerx - sx, self.rect.centery - sy)
+        v = pygame.Vector2(0, 1) if v.length_squared()==0 else v.normalize()
+        if knockback is None:
+            knockback = TILE / max(1e-3, duration)
         self.vel = v * knockback
         self.hurt_timer = duration
 
