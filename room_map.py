@@ -128,10 +128,42 @@ class RoomMap:
 
             if "image" in ts:  # embedded image
                 atlas_path = (json_path.parent / ts["image"]).resolve()
+                image_name = Path(ts["image"]).name
             elif "source" in ts:  # external TSX → parse to find the image
                 tsx_path = (json_path.parent / ts["source"]).resolve()
                 img_from_tsx = self._load_external_tsx_image(tsx_path)
-                if img_from_tsx: atlas_path = img_from_tsx
+                atlas_path = img_from_tsx if img_from_tsx else None
+                image_name = Path(img_from_tsx).name if img_from_tsx else None
+            else:
+                image_name = None
+
+            # If the resolved path doesn't exist (e.g., local Downloads path), try fallbacks by filename
+            if not (atlas_path and atlas_path.exists()):
+                candidate_dirs = [
+                    json_path.parent,
+                    Path("sprites_en").resolve(),
+                    Path("assets").resolve(),
+                    Path("maps").resolve(),
+                    Path(".").resolve(),
+                ]
+                if image_name:
+                    stem = Path(image_name).stem
+                    # try exact name first, then alternate extensions with same stem
+                    alt_exts = [".png", ".webp", ".jpg", ".jpeg"]
+                    for folder in candidate_dirs:
+                        # exact match
+                        cand = (folder / image_name)
+                        if cand.exists():
+                            atlas_path = cand.resolve()
+                            break
+                        # extension-agnostic match
+                        for ext in alt_exts:
+                            alt = (folder / f"{stem}{ext}")
+                            if alt.exists():
+                                atlas_path = alt.resolve()
+                                break
+                        if atlas_path and atlas_path.exists():
+                            break
 
             if atlas_path and atlas_path.exists():
                 atlases.append(pygame.image.load(atlas_path.as_posix()).convert_alpha())
