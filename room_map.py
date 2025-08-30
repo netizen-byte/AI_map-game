@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import pygame
-from constants import TILE, HAZARD_GIDS
+from constants import TILE, HAZARD_GIDS, BOMB_GIDS
 
 # New: keys that mark a door layer (doors are walkable, but detected)
 DOOR_LAYER_KEYS = ("door", "doors")
@@ -250,8 +250,11 @@ class RoomMap:
                         floor_cells.append((x, y))
                     elif any(k in lname for k in DOOR_LAYER_KEYS):
                         door_cells.append((x, y))
-                    elif gid in HAZARD_GIDS:                           # <-- NEW: works even if on "Decor"
+                    elif gid in HAZARD_GIDS:                          
                         hazards.append(tile_rect)
+                    elif gid in BOMB_GIDS:
+                        hazards.append(tile_rect)
+                        bombs.append(tile_rect.inflate(1, 1))
                     elif any(k in lname for k in HAZARD_LAYER_KEYS):   # layer named "trap/lava/hazard"
                         hazards.append(tile_rect)
                     elif any(k in lname for k in DECOR_LAYER_KEYS):

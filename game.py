@@ -404,8 +404,14 @@ class Game:
                     self.just_entered_room = False
                     self._entry_spawn_center = None
             self._check_door_trigger()
-            self._apply_hazard_damage(dt)
             self._check_bomb_trigger()
+            if getattr(self, "_bomb_kill_timer", 0.0) > 0.0:
+                self._bomb_kill_timer -= dt
+                if self._bomb_kill_timer <= 0.0 and not self.player.dead:
+                    self.player.kill_instant()
+                    self._start_death_sequence(0.8)
+            else:
+                self._apply_hazard_damage(dt)
 
         self.screen.fill((18, 22, 28))
         off = self.offset
@@ -432,6 +438,8 @@ class Game:
 
     # ------------- hazards -------------
     def _apply_hazard_damage(self, dt: float):
+        if getattr(self, "_bomb_kill_timer", 0.0) > 0.0:
+            return
         self._hazard_tick_accum += dt
         if self._hazard_tick_accum < HAZARD_TICK_SECONDS:
             return
@@ -447,30 +455,30 @@ class Game:
                 break
 
     def _check_bomb_trigger(self):
-        if not hasattr(self.room, 'bomb_rects'):
+        if getattr(self, "_bomb_kill_timer", 0.0) > 0.0:
+            return
+        if not hasattr(self.room, "bomb_rects"):
             return
         for r in self.room.bomb_rects():
             if self.player.hitbox.colliderect(r):
                 self._explode_bomb(r.center)
                 break
 
-    def _explode_bomb(self, center: tuple[int,int]):
-        # load smoke frames if available
+    def _explode_bomb(self, center: tuple[int, int]):
         self._bomb_frames = []
-        for i in range(0, 10):
-            for cand in (f"particles/smoke/{i}.png", f"particles/smoke/{i}.webp"):
-                p = Path(cand)
-                if p.exists():
+        smoke_dir = Path("particles/smoke")
+        if smoke_dir.exists():
+            for p in sorted(smoke_dir.iterdir()):
+                if p.suffix.lower() in (".png"):
                     try:
                         self._bomb_frames.append(pygame.image.load(p.as_posix()).convert_alpha())
                     except Exception:
                         pass
-                    break
         self._bomb_center = center
         self._bomb_index = 0
-        # instakill with short delay
-        self.player.kill_instant()
-        self._start_death_sequence()
+        self.player.hurt_from(center, duration=0.18)
+        self._bomb_kill_timer = 0.22
+
 
     def _draw_bomb_effect(self, off: tuple[int,int]):
         if not getattr(self, '_bomb_frames', None):
