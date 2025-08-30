@@ -7,6 +7,8 @@ from constants import SCREEN_W, SCREEN_H, FPS, TILE, HAZARD_DAMAGE, HAZARD_TICK_
 from room_map import RoomMap
 from player import Player
 
+from UCS import ucs_new
+
 
 class TextBox:
     def __init__(self, font: pygame.font.Font):
@@ -133,9 +135,77 @@ class Game:
             "room1.json": "A quiet library. A soft light glows to the north.",
             "room2.json": "Storage room — might be useful items here.",
         }
+
+                # ------------- UCS Integration Starts Here -------------
+        # 1. Create a dictionary to hold our Node objects.
+        self.ucs_nodes = {}
+
+        # 2. Iterate through all the room names and create a Node for each.
+        for room_name in self.rooms:
+            # We need to decide on the danger_cost and whether it's a trap.
+            # This is where your teammate's randomization logic would go.
+            # For now, let's use some simple placeholder logic.
+            danger_cost = 1
+            
+            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=False)
+
+        # 3. Add doors (edges) to the Node objects using the door_graph.
+        for src_room_name, mappings in self.door_graph.items():
+            if src_room_name in self.ucs_nodes:
+                for local_idx, (dst_room_name, _) in mappings.items():
+                    if dst_room_name in self.ucs_nodes:
+                        # For finding the shortest path, all edge costs are also 1.
+                        self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
+
+        # 4. Instantiate the UCSGame class with the created nodes, and define start/goal.
+        # Here we're setting the goal to "room12.json" as an example.
+        start_node_name = room_json
+        goal_node_name = "room12.json"
+        self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
+
+        # ------------- UCS Integration Ends Here -------------
+
         self._hazard_tick_accum = 0.0
         self.game_over = False
         self.show_door_ids = True
+
+
+    def display_UCS(self):
+        cur_name = self.rooms[self.cur]
+        current_node = self.ucs_nodes.get(cur_name)
+        if not current_node:
+            return "Pathfinding data not available for this room."
+
+        # Call the UCS algorithm to get the shortest path and cost
+        cost, path = self.ucs_game.uniform_cost_search(current_node, self.ucs_game.goal)
+        
+        if cost == float("inf"):
+            return "There is no path to the goal from here."
+        else:
+            path_names = [n.name.replace(".json", "") for n in path]
+            path_str = "-> ".join(path_names)
+            return f"Shortest path is: {path_str}."
+        
+    def _draw_ucs_path(self):
+        if not hasattr(self, "ucs_game") or not self.ucs_game:
+            return
+        
+        # Run UCS to get the available path (list of node/room names)
+        path = self.display_UCS()  # should return list of room names
+        
+        if not path:
+            return
+
+        small_font = pygame.font.Font(None, 24)
+        text = path  # e.g. room1.json → room2.json → room12.json
+        surf = small_font.render(text, True, (200, 240, 200))
+
+        # Position at top-right, 20px from edge
+        x = SCREEN_W - surf.get_width() - 20
+        y = 20  # just under the top edge
+        self.screen.blit(surf, (x, y))
+
+
 
     @property
     def offset(self) -> Tuple[int,int]:
@@ -421,6 +491,10 @@ class Game:
             self._draw_door_id_overlay(off)
         self._draw_bomb_effect(off)
         self._draw_health_bar()
+
+        #draw UCS
+        self._draw_ucs_path()  # now shows top-right
+
         self.confirm.draw(self.screen)
         # delayed game over after death anim
         if hasattr(self, '_death_time') and self._death_time is not None and not self.game_over:
