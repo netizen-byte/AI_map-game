@@ -107,8 +107,8 @@
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -209,15 +209,15 @@
                  "y":207
                 }, 
                 {
-                 "height":27.5,
+                 "height":19.5,
                  "id":8,
                  "name":"",
                  "rotation":0,
                  "type":"",
                  "visible":true,
-                 "width":29.5,
-                 "x":545.5,
-                 "y":356
+                 "width":24.8333,
+                 "x":547.833,
+                 "y":359.667
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -226,7 +226,7 @@
          "y":0
         }],
  "nextlayerid":6,
- "nextobjectid":9,
+ "nextobjectid":30,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
@@ -235,7 +235,7 @@
         {
          "columns":7,
          "firstgid":1,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/wallfloor.png",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/wallfloor.png",
          "imageheight":256,
          "imagewidth":224,
          "margin":0,
@@ -248,7 +248,7 @@
         {
          "columns":6,
          "firstgid":57,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/PurpleDungeonTilesNoFloor2.webp",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/PurpleDungeonTilesNoFloor2.webp",
          "imageheight":192,
          "imagewidth":192,
          "margin":0,
@@ -298,7 +298,7 @@
         {
          "columns":16,
          "firstgid":93,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/32x32\/B32x32.png",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/32x32\/B32x32.png",
          "imageheight":512,
          "imagewidth":512,
          "margin":0,
@@ -311,7 +311,7 @@
         {
          "columns":10,
          "firstgid":349,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/volcanoe_assets.webp",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/volcanoe_assets.webp",
          "imageheight":288,
          "imagewidth":320,
          "margin":0,

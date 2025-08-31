@@ -105,6 +105,17 @@ class Game:
         # Collect all roomN.json present so door_graph targets (like room12) exist
         candidates = [f"room{i}.json" for i in range(1, 21)]
         self.rooms: List[str] = [r for r in candidates if (Path(map_dir)/r).exists()] or ["room1.json"]
+        # Ensure canonical ordering: room1 first (start), room12 last (end) if present.
+        if "room1.json" in self.rooms:
+            self.rooms.remove("room1.json")
+            self.rooms.insert(0, "room1.json")
+        if "room12.json" in self.rooms:
+            # remove any existing occurrence then append to guarantee last position
+            try:
+                self.rooms.remove("room12.json")
+            except ValueError:
+                pass
+            self.rooms.append("room12.json")
         self.cur = 0
         self.room = self.map.load_json_room(self.rooms[self.cur])
         
@@ -122,7 +133,74 @@ class Game:
         self._boss_death_pos = None
 
         # Door graph (forward links only; reverse links auto-added below)
-        self.door_graph = {
+        #
+    # --- Alternative door_graph examples (fully connected variants) ---
+    # Below are five commented, ready-to-use `door_graph` dictionaries. Each one
+    # ensures every room and every door index has a destination. To use one,
+    # uncomment it and replace the active `self.door_graph` assignment below.
+    #
+    # Option A - "Complete (preserve original style)"
+        self.door_graph_B = {
+            "room1.json": {0: ("room6.json", 0)},
+            "room2.json": {0: ("room3.json", 0), 2: ("room11.json", 2)},
+            "room3.json": {1: ("room4.json", 0)},
+            "room4.json": {1: ("room11.json", 1)},
+            "room5.json": {0: ("room7.json", 2)},
+            "room6.json": {1: ("room9.json", 1)},
+            "room7.json": {0: ("room2.json", 1)},
+            "room8.json": {0: ("room9.json", 0), 1: ("room7.json", 1)},
+            "room9.json": {},
+            "room10.json": {0: ("room11.json", 0), 1: ("room12.json", 0)},
+            "room11.json": {0: ("room10.json", 0), 1: ("room4.json", 1)},
+            "room12.json": {},
+        }
+        
+        self.door_graph_C = {
+            "room1.json": {0: ("room3.json", 0)},
+            "room2.json": {0: ("room6.json", 1), 1: ("room8.json", 0), 2: ("room4.json", 0)},
+            "room3.json": {1: ("room7.json", 2)},
+            "room4.json": {1: ("room7.json", 0)},
+            "room5.json": {0: ("room7.json", 1)},
+            "room6.json": {0: ("room9.json", 1)},
+            "room7.json": {},
+            "room8.json": {1: ("room11.json", 0)},
+            "room9.json": {0: ("room11.json", 1), 1: ("room10.json", 1)},
+            "room10.json": {0: ("room11.json", 2), 1: ("room12.json", 0)},
+            "room11.json": {},
+            "room12.json": {},
+        }
+        
+        self.door_graph_D = {
+            "room1.json": {0: ("room9.json", 1)},
+            "room2.json": {0: ("room6.json", 0), 1: ("room4.json", 0), 2: ("room3.json", 0)},
+            "room3.json": {1: ("room11.json", 1)},
+            "room4.json": {1: ("room5.json", 0)},
+            "room5.json": {},
+            "room6.json": {1: ("room8.json", 1)},
+            "room7.json": {0: ("room10.json", 1), 1: ("room11.json", 2), 2: ("room12.json", 1)},
+            "room8.json": {0: ("room9.json", 0)},
+            "room9.json": {},
+            "room10.json": {1: ("room11.json", 0)},
+            "room11.json": {},
+            "room12.json": {},
+        }
+        
+        self.door_graph_E = {
+            "room1.json": {0: ("room11.json", 0)},
+            "room2.json": {0: ("room3.json", 0), 1: ("room4.json", 0), 2: ("room11.json", 2)},
+            "room3.json": {1: ("room12.json", 0)},
+            "room4.json": {1: ("room7.json", 2)},
+            "room5.json": {0: ("room7.json", 0)},
+            "room6.json": {0: ("room9.json", 9), 1: ("room8.json", 0)},
+            "room7.json": {1: ("room8.json", 1)},
+            "room8.json": {},
+            "room9.json": {1: ("room10.json", 1)},
+            "room10.json": {0: ("room11.json", 1)},
+            "room11.json": {},
+            "room12.json": {},
+        }
+
+        self.door_graph_A = {
             "room1.json": {0: ("room2.json", 0)},
             "room2.json": {1: ("room5.json", 0), 2: ("room3.json", 0)},
             "room3.json": {1: ("room4.json", 0)},
@@ -136,17 +214,76 @@ class Game:
             "room11.json": {1: ("room12.json", 0)},
             "room12.json": {},
         }
-        # Auto add reverse links
+        # --- Randomly choose one of the prepared door_graph variants at startup ---
+        variants = {
+            "A": self.door_graph_A,
+            "B": self.door_graph_B,
+            "C": self.door_graph_C,
+            "D": self.door_graph_D,
+            "E": self.door_graph_E,
+        }
+        chosen_key = random.choice(list(variants.keys()))
+        self.door_graph = variants[chosen_key]
+        print(f"[DoorGraph] Selected variant: {chosen_key}")
+        # Auto add reverse links (robust)
+        # Ensure every forward mapping has a sensible reverse mapping.
         for src, mapping in list(self.door_graph.items()):
             for local_i, (dst, dst_i) in list(mapping.items()):
                 rev = self.door_graph.setdefault(dst, {})
-                rev.setdefault(dst_i, (src, local_i))
+                # Validate the destination room's door count so we don't point at a
+                # non-existent index. If the dst room isn't loadable or has no
+                # doors, fall back to index 0. Otherwise prefer the declared dst_i
+                # if it's in range, else pick a free index in the dst room.
+                try:
+                    dst_room = self.map.load_json_room(dst)
+                    dst_count = len(dst_room.door_cells)
+                except Exception:
+                    dst_count = 0
+
+                if dst_count <= 0:
+                    valid_dst_i = 0
+                else:
+                    if not isinstance(dst_i, int) or dst_i < 0 or dst_i >= dst_count:
+                        # find an unused index in the dst room, otherwise 0
+                        used = set(rev.keys())
+                        valid_dst_i = next((i for i in range(dst_count) if i not in used), 0)
+                    else:
+                        valid_dst_i = dst_i
+
+                # Add reverse link without clobbering an existing correct mapping.
+                existing = rev.get(valid_dst_i)
+                if existing is None:
+                    rev[valid_dst_i] = (src, local_i)
+                elif existing != (src, local_i):
+                    # If the exact reverse already points somewhere else, try to
+                    # find a free slot; if none, overwrite the chosen index so at
+                    # least one valid reverse exists.
+                    if dst_count > 0:
+                        placed = False
+                        for i in range(dst_count):
+                            if i not in rev:
+                                rev[i] = (src, local_i)
+                                placed = True
+                                break
+                        if not placed:
+                            rev[valid_dst_i] = (src, local_i)
+
         self._verify_door_graph()
         self._report_unconnected_doors()
         # Ensure all referenced rooms are in self.rooms
         for rn in {n for m in self.door_graph.values() for (n, _) in m.values()}:
             if rn not in self.rooms and (Path(map_dir) / rn).exists():
                 self.rooms.append(rn)
+        # Re-apply ordering to make sure room1 is at start and room12 is final after any appends.
+        if "room1.json" in self.rooms:
+            self.rooms.remove("room1.json")
+            self.rooms.insert(0, "room1.json")
+        if "room12.json" in self.rooms:
+            try:
+                self.rooms.remove("room12.json")
+            except ValueError:
+                pass
+            self.rooms.append("room12.json")
 
         # UI + hints
         self.confirm = ConfirmBox(self.font)
@@ -159,10 +296,14 @@ class Game:
 
         # ------------- UCS Integration Starts Here -------------
         self.ucs_nodes = {}
-        trap_room = random.choice([r for r in self.rooms if r != room_json])
-        
+        # Pick a trap room but never choose the final boss room (room12.json)
+        trap_candidates = [r for r in self.rooms if r != room_json and r != "room12.json"]
+        if not trap_candidates:
+            trap_candidates = [r for r in self.rooms if r != room_json]
+        trap_room = random.choice(trap_candidates) if trap_candidates else None
+
         for room_name in self.rooms:
-            if room_name == trap_room:
+            if trap_room is not None and room_name == trap_room:
                 danger_cost = 10
                 trap = True
             else:
@@ -176,7 +317,13 @@ class Game:
                     if dst_room_name in self.ucs_nodes:
                         self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
         start_node_name = room_json
-        goal_node_name = random.choice([f"room{i}.json" for i in range(2, 13)]) #randomly choose a goal node from room2 to room12
+        # Use room12.json as deterministic goal when available; otherwise fall back
+        # to a safe choice among existing rooms (preserves previous behavior only
+        # if room12 is not present).
+        if "room12.json" in self.rooms:
+            goal_node_name = "room12.json"
+        # else:
+        #     goal_node_name = random.choice([r for r in self.rooms if r != start_node_name]) if len(self.rooms) > 1 else start_node_name
         # print(goal_node_name)
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
         print(self.ucs_game.get_least_cost_to_goal())
@@ -348,18 +495,34 @@ class Game:
                 cy_front = int((dy - 0.5) * TILE)
             self.player.rect.center = (cx, cy_front)
             
-            # ---------- Check for UCS goal ----------
-            if hasattr(self, "ucs_game"):
-                cur_name = self.rooms[self.cur]
-                if cur_name == self.ucs_game.goal.name:
-                    self.win_screen = True
-                    if hasattr(self, "confirm"):
-                        self.confirm.show(
-                            f"You have reached the goal room: {cur_name.replace('.json','')}!\nCongratulations!",
-                            confirm=False
-                        )
-                elif self.ucs_game.nodes[cur_name].trap:
-                    self.game_over = True
+            # ---------- Check for UCS trap ----------
+            # Do not auto-win on entering the UCS goal room; the player must
+            # defeat the boss in room12 to finish the game. Instead of instantly
+            # flipping to Game Over when a room is marked as a trap, apply damage
+            # scaled by the node's danger_cost so the player only dies if HP hits 0.
+            if hasattr(self, "ucs_game") and self.ucs_game.nodes.get(self.rooms[self.cur]):
+                node = self.ucs_game.nodes[self.rooms[self.cur]]
+                if node.trap:
+                    # use a modest damage derived from danger_cost so entering a trap
+                    # doesn't instantly kill a full-health player. Scale down the
+                    # node danger_cost (e.g. divide) and clamp to at least 1.
+                    try:
+                        damage = max(1, int(node.danger_cost / 4))
+                    except Exception:
+                        damage = max(1, HAZARD_DAMAGE)
+
+                    # apply damage and show hurt feedback from the door center
+                    self.player.take_damage(damage)
+                    try:
+                        self.player.hurt_from((cx, cy_front))
+                    except Exception:
+                        # fallback to player's center if door coords missing
+                        self.player.hurt_from(self.player.rect.center)
+                    # only trigger normal death sequence if hp <= 0 (preserve invuln flow)
+                    if self.player.hp <= 0 and not getattr(self.player, "dead", False):
+                        if hasattr(self.player, "kill_instant"):
+                            self.player.kill_instant()
+                        self._start_death_sequence()
         else:
             sx, sy = self.room.get_spawn_point()
             self.player.rect.center = (sx, sy)
@@ -442,6 +605,59 @@ class Game:
             if placed:
                 test = self.player.rect.copy()
                 if any(test.colliderect(s) for s in self.room.solids):
+            #
+            # Option G - "Path chain (1 -> 2 -> 3 -> 4 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12)"
+            # - Uses distinct indices so every mapping is reversible (A:i <-> B:j).
+            # - Every door index present in the maps is given a destination.
+            # - room1 is the start, room12 is the goal and only room12:0 is used.
+            # alt_door_graph_G = {
+            #     "room1.json": {0: ("room2.json", 0)},
+            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room5.json", 0)},
+            #     "room3.json": {0: ("room2.json", 1), 1: ("room4.json", 0)},
+            #     "room4.json": {0: ("room3.json", 1), 1: ("room6.json", 0)},
+            #     "room5.json": {0: ("room2.json", 2)},
+            #     "room6.json": {0: ("room4.json", 1), 1: ("room7.json", 0)},
+            #     "room7.json": {0: ("room6.json", 1), 1: ("room8.json", 0), 2: ("room11.json", 1)},
+            #     "room8.json": {0: ("room7.json", 1), 1: ("room9.json", 0)},
+            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
+            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
+            #     "room11.json": {0: ("room10.json", 1), 1: ("room7.json", 2), 2: ("room12.json", 0)},
+            #     "room12.json": {0: ("room11.json", 2)},
+            # }
+            #
+            # Option H - "Same path as G but alternate leftover pairings"
+            # - Keeps the main path (room1->...->room12) but pairs spare doors differently.
+            # alt_door_graph_H = {
+            #     "room1.json": {0: ("room2.json", 0)},
+            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room11.json", 1)},
+            #     "room3.json": {0: ("room2.json", 1), 1: ("room4.json", 0)},
+            #     "room4.json": {0: ("room3.json", 1), 1: ("room6.json", 0)},
+            #     "room5.json": {0: ("room7.json", 2)},
+            #     "room6.json": {0: ("room4.json", 1), 1: ("room7.json", 0)},
+            #     "room7.json": {0: ("room6.json", 1), 1: ("room8.json", 0), 2: ("room5.json", 0)},
+            #     "room8.json": {0: ("room7.json", 1), 1: ("room9.json", 0)},
+            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
+            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
+            #     "room11.json": {0: ("room10.json", 1), 1: ("room2.json", 2), 2: ("room12.json", 0)},
+            #     "room12.json": {0: ("room11.json", 2)},
+            # }
+            #
+            # Option I - "Alternate route (1 -> 2 -> 3 -> 7 -> 11 -> 12) with remaining doors paired"
+            # - Another chain that reaches room12 and keeps all links reversible.
+            # alt_door_graph_I = {
+            #     "room1.json": {0: ("room2.json", 0)},
+            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room4.json", 0)},
+            #     "room3.json": {0: ("room2.json", 1), 1: ("room7.json", 0)},
+            #     "room4.json": {0: ("room2.json", 2), 1: ("room5.json", 0)},
+            #     "room5.json": {0: ("room4.json", 1)},
+            #     "room6.json": {0: ("room6.json", 1), 1: ("room6.json", 0)},
+            #     "room7.json": {0: ("room3.json", 1), 1: ("room11.json", 2), 2: ("room8.json", 0)},
+            #     "room8.json": {0: ("room7.json", 2), 1: ("room9.json", 0)},
+            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
+            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
+            #     "room11.json": {0: ("room10.json", 1), 1: ("room2.json", 2), 2: ("room12.json", 0)},
+            #     "room12.json": {0: ("room11.json", 2)},
+            # }
                     sx, sy = self.room.get_spawn_point()
                     self.player.rect.center = (sx, sy)
             else:
