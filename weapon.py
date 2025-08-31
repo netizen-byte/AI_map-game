@@ -73,8 +73,5 @@ class Weapon(pygame.sprite.Sprite):
     def draw(self, surface: pygame.Surface, offset: Tuple[int,int]):
         r = self.rect.move(offset)
         surface.blit(self.image, r)
-        # TEMP debug outline (toggle by commenting out)
-        pygame.draw.rect(surface, (255,255,0), r, 1)
-        if not hasattr(self, '_debug_once'):
-            print(f"Draw sword at {r.topleft} size={self.image.get_size()}")
-            self._debug_once = True
+        # Remove debug outline (yellow box)
+        # Previously used for debugging; no longer needed

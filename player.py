@@ -53,12 +53,12 @@ class Player:
         self.image  = self.anim[self.state][self.frame]
         self.rect   = self.image.get_rect(center=spawn_xy)
 
-        # --- FEET-ONLY HITBOX ---
-        # narrower and shorter; anchored to the feet so only "stepping on" hurts
+        # --- REDUCED HITBOX ---
+        # Adjust hitbox to be just around the player character
         hb = self.rect.copy()
-        hb.width  = int(hb.width * 0.60)    # ~60% of sprite width
-        hb.height = int(hb.height * 0.35)   # bottom ~35% of sprite height
-        hb.midbottom = self.rect.midbottom  # align with feet
+        hb.width = int(hb.width * 0.8)  # ~80% of sprite width
+        hb.height = int(hb.height * 0.8)  # ~80% of sprite height
+        hb.center = self.rect.center  # Align with player center
         self.hitbox = hb
 
         self.vel    = pygame.Vector2(0, 0)
@@ -152,19 +152,59 @@ class Player:
                 self.frame = (self.frame + 1) % len(frames)
         self.image = frames[self.frame]
 
-    def _move_axis(self, dx: float, dy: float, solids: List[pygame.Rect]) -> None:
+    def _move_axis(self, dx: float, dy: float, solids: List[pygame.Rect], walkable_objects: List[pygame.Rect] = None) -> None:
+        if walkable_objects is None:
+            walkable_objects = []
+        
+        # Create a head-level collision area (top portion of player)
+        head_rect = self.rect.copy()
+        head_rect.height = int(self.rect.height * 0.65)  # Top 65% of player is head
+        head_rect.bottom = self.rect.bottom  # Align with player bottom
+        
         if dx:
             self.rect.x += int(dx)
             for s in solids:
                 if self.rect.colliderect(s):
-                    self.rect.right = min(self.rect.right, s.left) if dx > 0 else self.rect.right
-                    self.rect.left  = max(self.rect.left,  s.right) if dx < 0 else self.rect.left
+                    # Check if this is a walkable object
+                    is_walkable = s in walkable_objects
+                    if is_walkable:
+                        # For walkable objects, only block if the head area collides
+                        # If head doesn't collide, allow the player to pass through
+                        if head_rect.colliderect(s):
+                            # Head collides with walkable object, so block movement
+                            print(f"HEAD COLLISION DETECTED with walkable object {s}")
+                            self.rect.right = min(self.rect.right, s.left) if dx > 0 else self.rect.right
+                            self.rect.left  = max(self.rect.left,  s.right) if dx < 0 else self.rect.left
+                        else:
+                            print(f"Head can pass through walkable object {s}")
+                        # If head doesn't collide, do nothing (allow passage)
+                    else:
+                        # For solid objects, block the entire player
+                        print(f"Solid object collision with {s}")
+                        self.rect.right = min(self.rect.right, s.left) if dx > 0 else self.rect.right
+                        self.rect.left  = max(self.rect.left,  s.right) if dx < 0 else self.rect.left
         if dy:
             self.rect.y += int(dy)
             for s in solids:
                 if self.rect.colliderect(s):
-                    self.rect.bottom = min(self.rect.bottom, s.top) if dy > 0 else self.rect.bottom
-                    self.rect.top    = max(self.rect.top,    s.bottom) if dy < 0 else self.rect.top
+                    # Check if this is a walkable object
+                    is_walkable = s in walkable_objects
+                    if is_walkable:
+                        # For walkable objects, only block if the head area collides
+                        # If head doesn't collide, allow the player to pass through
+                        if head_rect.colliderect(s):
+                            # Head collides with walkable object, so block movement
+                            print(f"HEAD COLLISION DETECTED with walkable object {s}")
+                            self.rect.bottom = min(self.rect.bottom, s.top) if dy > 0 else self.rect.bottom
+                            self.rect.top    = max(self.rect.top,    s.bottom) if dy < 0 else self.rect.top
+                        else:
+                            print(f"Head can pass through walkable object {s}")
+                        # If head doesn't collide, do nothing (allow passage)
+                    else:
+                        # For solid objects, block the entire player
+                        print(f"Solid object collision with {s}")
+                        self.rect.bottom = min(self.rect.bottom, s.top) if dy > 0 else self.rect.bottom
+                        self.rect.top    = max(self.rect.top,    s.bottom) if dy < 0 else self.rect.top
 
     # offset = camera/room offset; update works with world solids shifted to screen
     def update(self, dt: float, room, offset: Tuple[int,int]=(0,0)) -> None:
@@ -182,15 +222,24 @@ class Player:
                 self.weapon = None
 
         solids = room.solid_rects(offset)
+        walkable_objects = room.walkable_rects(offset)
+        
+        # DEBUG: Print collision info
+        print(f"Solids count: {len(solids)}")
+        print(f"Walkable objects count: {len(walkable_objects)}")
+        if walkable_objects:
+            print(f"First walkable object: {walkable_objects[0]}")
+        if solids:
+            print(f"First solid: {solids[0]}")
         # Apply player input movement (blocked while attacking or dead)
         if not self.dead and not self.attacking and self.vel.length_squared() > 0:
-            self._move_axis(self.vel.x * dt, 0, solids)
-            self._move_axis(0, self.vel.y * dt, solids)
+            self._move_axis(self.vel.x * dt, 0, solids, walkable_objects)
+            self._move_axis(0, self.vel.y * dt, solids, walkable_objects)
 
         # Apply knockback while hurt
         if self.hurt_timer > 0 and self.knock.length_squared() > 0:
-            self._move_axis(self.knock.x * dt, 0, solids)
-            self._move_axis(0, self.knock.y * dt, solids)
+            self._move_axis(self.knock.x * dt, 0, solids, walkable_objects)
+            self._move_axis(0, self.knock.y * dt, solids, walkable_objects)
             self.knock *= 0.88
             if self.knock.length_squared() < 4:
                 self.knock.update(0, 0)
@@ -243,6 +292,9 @@ class Player:
                 return
         # default (no attack)
         screen.blit(self.image, self.rect.move(off))
+        
+        # Remove hitbox visualization (yellow box)
+        # Previously used for debugging; no longer needed
 
     def kill_instant(self) -> None:
         self.hp = 0

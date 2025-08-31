@@ -134,6 +134,24 @@ class Room:
         ox, oy = offset
         return [r.move(-ox, -oy) for r in rects]
 
+    def walkable_rects(self, offset: Tuple[int, int] | None = None) -> List[pygame.Rect]:
+        """
+        Returns rectangles that are considered walkable for the player.
+        Only the lower portion of objects is treated as solid.
+        """
+        rects = []
+        for solid in self.solids:
+            # Adjust the solid rectangle to exclude the upper portion
+            adjusted_rect = pygame.Rect(
+                solid.x, solid.y + solid.h // 2, solid.w, solid.h // 2
+            )
+            rects.append(adjusted_rect)
+
+        if offset is None:
+            return rects
+        ox, oy = offset
+        return [r.move(-ox, -oy) for r in rects]
+
 
 class RoomMap:
     """Load pre-rendered room from a single Tiled JSON file."""

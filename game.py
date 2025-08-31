@@ -524,6 +524,7 @@ class Game:
         self.screen.fill((18, 22, 28))
         off = self.offset
         self.room.draw(self.screen, off)
+        
         # >>> draw the boss (was missing)
         if self.boss:
             self.boss.draw(self.screen, off)
