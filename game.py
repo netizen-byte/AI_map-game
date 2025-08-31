@@ -8,6 +8,7 @@ from room_map import RoomMap
 from player import Player
 
 from UCS import ucs_new
+from BFS import BFSver3
 
 from boss import Boss
 
@@ -157,6 +158,11 @@ class Game:
             "room2.json": "Storage room — might be useful items here.",
         }
 
+
+        # Define a single start and goal room for both algorithms
+        start_node_name = room_json
+        goal_node_name = random.choice([f"room{i}.json" for i in range(2, 13)])
+
         # ------------- UCS Integration Starts Here -------------
         self.ucs_nodes = {}
         trap_room = random.choice([r for r in self.rooms if r != room_json])
@@ -175,13 +181,32 @@ class Game:
                 for local_idx, (dst_room_name, _) in mappings.items():
                     if dst_room_name in self.ucs_nodes:
                         self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
-        start_node_name = room_json
-        goal_node_name = random.choice([f"room{i}.json" for i in range(2, 13)]) #randomly choose a goal node from room2 to room12
         # print(goal_node_name)
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
         print(self.ucs_game.get_least_cost_to_goal())
         # print(f"{self.ucs_game.uniform_cost_search(self.ucs_game.start, self.ucs_game.goal)}")
         # ------------- UCS Integration Ends Here -------------
+
+        # ------------- BFS Integration Starts Here -------------
+        self.BFS_nodes = {}
+        # 1. Create a dictionary to hold our Node objects.
+        for room_name in self.rooms:
+            # Create BFS nodes and assign them to the correct dictionary
+            self.BFS_nodes[room_name] = BFSver3.Node(room_name)
+
+        # 2. Add doors (edges) to the Node objects using the door_graph.
+        for src_room_name, mappings in self.door_graph.items():
+            if src_room_name in self.BFS_nodes:
+                for local_idx, (dst_room_name, _) in mappings.items():
+                    if dst_room_name in self.BFS_nodes:
+                        # Use the correct add_door method without a cost
+                        self.BFS_nodes[src_room_name].add_door(f"door_{local_idx}", self.BFS_nodes[dst_room_name])
+                        
+        # Instantiate the correct class BFSGame
+        self.bfs_game = BFSver3.BFSGame(self.BFS_nodes, start_node_name, goal_node_name)
+
+        # ------------- BFS Integration Ends Here -------------
+
 
         # Misc gameplay state
         self._hazard_tick_accum = 0.0
@@ -189,6 +214,24 @@ class Game:
         self.show_door_ids = True
         self.win_screen = False
 
+
+    def display_BFS(self):
+            cur_name = self.rooms[self.cur]
+            current_node = self.BFS_nodes.get(cur_name)
+            if not current_node:
+                return "Pathfinding data not available for this room."
+            
+            # Call the BFS algorithm to get the shortest path.
+            # It is already handled by the get_shortest_path_to_goal() method.
+            path = self.bfs_game.get_shortest_path_to_goal()
+            
+            if not path:
+                return "There is no path to the goal from here."
+            else:
+                path_names = [n.name.replace(".json", "") for n in path]
+                path_str = "-> ".join(path_names)
+                return f"BFS says shortest path is: {path_str}."
+        
 
     def display_UCS(self): 
         cur_name = self.rooms[self.cur]
@@ -205,7 +248,7 @@ class Game:
         else:
             path_names = [n.name.replace(".json", "") for n in path]
             path_str = "-> ".join(path_names)
-            return f"Shortest path is: {path_str}."
+            return f"UCS says shortest path is: {path_str}."
         
     def _draw_ucs_path(self): #draw the string from function above to pygame screen
         if not hasattr(self, "ucs_game") or not self.ucs_game:
@@ -224,6 +267,25 @@ class Game:
         # Position at top-right, 20px from edge
         x = SCREEN_W - surf.get_width() - 20
         y = 20  # just under the top edge
+        self.screen.blit(surf, (x, y))
+
+    def _draw_bfs_path(self): #draw the string from function above to pygame screen
+        if not hasattr(self, "bfs_game") or not self.bfs_game:
+            return
+        
+        # Run UCS to get the available path (list of node/room names)
+        path = self.display_BFS()  # should return list of room names
+        
+        if not path:
+            return
+
+        small_font = pygame.font.Font(None, 24)
+        text = path  # e.g. room1.json → room2.json → room12.json
+        surf = small_font.render(text, True, (200, 240, 200))
+
+        # Position at top-right, 20px from edge
+        x = SCREEN_W - surf.get_width() - 20
+        y = 40  # just under the top edge
         self.screen.blit(surf, (x, y))
 
 
@@ -605,6 +667,7 @@ class Game:
 
         #draw UCS
         self._draw_ucs_path()  # now shows top-right
+        self._draw_bfs_path()
         self._draw_current_room_name()
 
         self.confirm.draw(self.screen)
