@@ -177,7 +177,7 @@ class Game:
             "room4.json": {1: ("room5.json", 0)},
             "room5.json": {},
             "room6.json": {1: ("room8.json", 1)},
-            "room7.json": {0: ("room10.json", 1), 1: ("room11.json", 2), 2: ("room12.json", 0git )},
+            "room7.json": {0: ("room10.json", 1), 1: ("room11.json", 2), 2: ("room12.json", 0)},
             "room8.json": {0: ("room9.json", 0)},
             "room9.json": {},
             "room10.json": {1: ("room11.json", 0)},
