@@ -110,34 +110,45 @@ class Game:
         
         sx, sy = self.room.get_spawn_point()
         self.player = Player((sx, sy))
-        self._door_block_rect: pygame.Rect | None = None
-        # Door graph (forward links only; reverse links auto-added below).
-        # NOTE: User mapping (1-based door numbers in request -> 0-based here):
-        self.boss = None  
+        self._door_block_rect = None
+        # Boss + combat helper state
+        self.boss = None
+        self._boss_hit_cd = 0.0
+        self._boss_death_frames = []
+        self._boss_death_index = 0
+        self._boss_death_frame_time = 0.0
+        self._boss_death_done = False
+        self._boss_death_playing = False
+        self._boss_death_pos = None
 
-        self.door_graph: dict[str, dict[int, tuple[str,int]]] = {
-            "room1.json": { 0: ("room2.json", 0) },
-            "room2.json": { 1: ("room5.json", 0), 2: ("room3.json", 0) },
-            "room3.json": { 1: ("room4.json", 0) },
-            "room4.json": { 1: ("room6.json", 0) },
-            "room5.json": {},  # reverse from room2 will fill door0
-            "room6.json": { 1: ("room7.json", 0) },
-            "room7.json": { 1: ("room8.json", 1), 2: ("room11.json", 2) },
-            "room8.json": { 0: ("room9.json", 0) },
-            "room9.json": { 1: ("room10.json", 1) },
-            "room10.json": { 0: ("room11.json", 0) },
-            "room11.json": { 1: ("room12.json", 0) },
+        # Door graph (forward links only; reverse links auto-added below)
+        self.door_graph = {
+            "room1.json": {0: ("room2.json", 0)},
+            "room2.json": {1: ("room5.json", 0), 2: ("room3.json", 0)},
+            "room3.json": {1: ("room4.json", 0)},
+            "room4.json": {1: ("room6.json", 0)},
+            "room5.json": {},
+            "room6.json": {1: ("room7.json", 0)},
+            "room7.json": {1: ("room8.json", 1), 2: ("room11.json", 2)},
+            "room8.json": {0: ("room9.json", 0)},
+            "room9.json": {1: ("room10.json", 1)},
+            "room10.json": {0: ("room11.json", 0)},
+            "room11.json": {1: ("room12.json", 0)},
             "room12.json": {},
         }
+        # Auto add reverse links
         for src, mapping in list(self.door_graph.items()):
-            for local_i,(dst,dst_i) in list(mapping.items()):
+            for local_i, (dst, dst_i) in list(mapping.items()):
                 rev = self.door_graph.setdefault(dst, {})
                 rev.setdefault(dst_i, (src, local_i))
         self._verify_door_graph()
         self._report_unconnected_doors()
-        for rn in {n for m in self.door_graph.values() for (n,_) in m.values()}:
-            if rn not in self.rooms and (Path("maps")/rn).exists():
+        # Ensure all referenced rooms are in self.rooms
+        for rn in {n for m in self.door_graph.values() for (n, _) in m.values()}:
+            if rn not in self.rooms and (Path(map_dir) / rn).exists():
                 self.rooms.append(rn)
+
+        # UI + hints
         self.confirm = ConfirmBox(self.font)
         self.previous_room = None
         self.door_confirm_extra = "Tip: collect items before leaving."
@@ -146,38 +157,26 @@ class Game:
             "room2.json": "Storage room — might be useful items here.",
         }
 
-                # ------------- UCS Integration Starts Here -------------
-        # 1. Create a dictionary to hold our Node objects.
+        # ------------- UCS Integration Starts Here -------------
         self.ucs_nodes = {}
-
-        # 2. Iterate through all the room names and create a Node for each.
         for room_name in self.rooms:
-            # We need to decide on the danger_cost and whether it's a trap.
-            # This is where your teammate's randomization logic would go.
-            # For now, let's use some simple placeholder logic.
             danger_cost = 1
-            
             self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=False)
-
-        # 3. Add doors (edges) to the Node objects using the door_graph.
         for src_room_name, mappings in self.door_graph.items():
             if src_room_name in self.ucs_nodes:
                 for local_idx, (dst_room_name, _) in mappings.items():
                     if dst_room_name in self.ucs_nodes:
-                        # For finding the shortest path, all edge costs are also 1.
                         self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
-
-        # 4. Instantiate the UCSGame class with the created nodes, and define start/goal.
-        # Here we're setting the goal to "room12.json" as an example.
         start_node_name = room_json
         goal_node_name = "room12.json"
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
-
         # ------------- UCS Integration Ends Here -------------
 
+        # Misc gameplay state
         self._hazard_tick_accum = 0.0
         self.game_over = False
         self.show_door_ids = True
+        self.win_screen = False
 
 
     def display_UCS(self):
@@ -486,6 +485,10 @@ class Game:
             # If we just entered, only clear the flag once the player has
             # moved away from the spawn center to avoid immediate re-trigger.
             
+            # decrement boss sword hit cooldown
+            if self._boss_hit_cd > 0:
+                self._boss_hit_cd = max(0.0, self._boss_hit_cd - dt)
+
             if self.boss and not self.confirm.active and not self.game_over:
                 self.boss.update(dt, self.room, self.player)
 
@@ -495,6 +498,10 @@ class Game:
                     if hasattr(self.player, "kill_instant"):
                         self.player.kill_instant()
                     self._start_death_sequence(0.8)  # short beat for the death anim
+                # trigger death animation start once boss reaches 0
+                if self.boss.is_dead() and not self._boss_death_playing:
+                    self._start_boss_death_animation()
+                    # keep boss object for its final frame reference removal handled by animation
                 
             if getattr(self, "just_entered_room", False):
                 ex, ey = getattr(self, "_entry_spawn_center", (0, 0))
@@ -520,19 +527,47 @@ class Game:
         # >>> draw the boss (was missing)
         if self.boss:
             self.boss.draw(self.screen, off)
+            self._draw_boss_hp_bar()
 
-        # check win and prompt
-        if self.boss and self.boss.is_dead():
-            self.confirm.show(
-                "You defeated the Raccoon Boss!\nReturn to the beginning?",
-                confirm=True,
-                confirm_hint="(Enter = Yes / Esc = No)",
-                on_yes=lambda: self._restart_to_room1(),
-                on_no=lambda: self.confirm.cancel()
-            )
-            self.boss = None
+        # boss death animation frames (plays after boss reaches 0 hp)
+        if self._boss_death_playing and self._boss_death_frames:
+            if self._boss_death_index < len(self._boss_death_frames):
+                img = self._boss_death_frames[self._boss_death_index]
+                # center at stored death position
+                if self._boss_death_pos:
+                    x, y = self._boss_death_pos
+                else:
+                    x, y = self.player.rect.center  # fallback
+                r = img.get_rect(center=(x + off[0], y + off[1]))
+                self.screen.blit(img, r)
+            # advance timing
+            self._boss_death_frame_time += dt
+            if self._boss_death_frame_time >= 0.07:  # frame duration
+                self._boss_death_frame_time = 0.0
+                self._boss_death_index += 1
+                if self._boss_death_index >= len(self._boss_death_frames):
+                    self._boss_death_playing = False
+                    self._boss_death_done = True
 
-        self.screen.blit(self.player.image, self.player.rect.move(off))
+        # show win screen after death animation completes
+        if self._boss_death_done and not self.win_screen:
+            self.win_screen = True
+            self._boss_death_done = False
+
+        # replace direct sprite blit with player.draw to allow weapon rendering
+        if hasattr(self.player, 'draw'):
+            self.player.draw(self.screen, off)
+            # sword damage check (only if boss alive and player attacking)
+            if self.boss and not self.boss.is_dead() and getattr(self.player, 'attacking', False) and self.player.weapon:
+                sword_rect = self.player.weapon.rect.copy()
+                # boss.hitbox already in room space; weapon rect is in room space (player.draw used offset only during blit)
+                if sword_rect.colliderect(self.boss.hitbox) and self._boss_hit_cd <= 0.0:
+                    # reduced sword damage (single small hit with cooldown)
+                    self.boss.take_damage(10)  # adjust value if further reduction needed
+                    self._boss_hit_cd = 0.35  # cannot damage again for 0.35s
+        else:
+            self.screen.blit(self.player.image, self.player.rect.move(off))
+
         if self.show_door_ids:
             self._draw_door_id_overlay(off)
         self._draw_bomb_effect(off)
@@ -550,6 +585,8 @@ class Game:
                 self._death_time = None
         if self.game_over:
             self._draw_game_over()
+        if self.win_screen:
+            self._draw_win_screen()
         pygame.display.flip()
         return True
 
@@ -620,6 +657,68 @@ class Game:
         pygame.draw.rect(self.screen, (40, 40, 52), pygame.Rect(x-2, y-2, max_w+4, h+4), border_radius=6)
         pygame.draw.rect(self.screen, (210, 50, 60), pygame.Rect(x, y, cur_w, h), border_radius=4)
         pygame.draw.rect(self.screen, (230, 230, 240), pygame.Rect(x, y, max_w, h), 2, border_radius=4)
+
+    def _draw_boss_hp_bar(self):
+        if not self.boss or self.boss.is_dead():
+            return
+        max_w = 300
+        h = 18
+        x = (SCREEN_W - max_w)//2
+        y = 60
+        ratio = max(0.0, min(1.0, self.boss.hp / max(1, self.boss.max_hp)))
+        cur_w = int(max_w * ratio)
+        pygame.draw.rect(self.screen, (30,30,40), pygame.Rect(x-2,y-2,max_w+4,h+4), border_radius=8)
+        pygame.draw.rect(self.screen, (200,40,50), pygame.Rect(x,y,cur_w,h), border_radius=6)
+        pygame.draw.rect(self.screen, (240,240,255), pygame.Rect(x,y,max_w,h), 2, border_radius=6)
+
+    def _start_boss_death_animation(self):
+        """Load raccoon particle death frames and start playback."""
+        self._boss_death_frames.clear()
+        base = Path("particles")/"raccoon"
+        bw = bh = 0
+        if self.boss:
+            bw, bh = self.boss.rect.size
+        if base.exists():
+            for p in sorted(base.iterdir(), key=lambda q: q.name):
+                if p.suffix.lower() not in (".png", ".webp"): continue
+                try:
+                    img = pygame.image.load(p.as_posix()).convert_alpha()
+                    # scale to boss size if we have it
+                    if bw and bh:
+                        img = pygame.transform.smoothscale(img, (bw, bh))
+                    self._boss_death_frames.append(img)
+                except Exception:
+                    pass
+        if not self._boss_death_frames:
+            # simple fallback effect
+            surf = pygame.Surface((64,64), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (255,200,60,180), (32,32), 30)
+            pygame.draw.circle(surf, (255,80,40,220), (32,32), 18)
+            if bw and bh:
+                surf = pygame.transform.smoothscale(surf, (bw, bh))
+            self._boss_death_frames = [surf]*10
+        # store position (center of boss rect) before removing boss reference for drawing
+        if self.boss:
+            self._boss_death_pos = self.boss.rect.center
+        self._boss_death_index = 0
+        self._boss_death_frame_time = 0.0
+        self._boss_death_playing = True
+        # remove boss entity from world (so no more collisions / hp bar) but keep animation
+        self.boss = None
+
+    def _draw_win_screen(self):
+        surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        surf.fill((0,0,0,160))
+        self.screen.blit(surf, (0,0))
+        big = pygame.font.Font(None, 60)
+        mid = pygame.font.Font(None, 36)
+        small = self.font
+        title = big.render("Victory!", True, (255, 240, 120))
+        msg = mid.render("You defeated the Boss", True, (245,245,250))
+        hint = small.render("Press Enter to play again", True, (230,230,235))
+        self.screen.blit(title, (SCREEN_W//2 - title.get_width()//2, SCREEN_H//2 - 120))
+        self.screen.blit(msg, (SCREEN_W//2 - msg.get_width()//2, SCREEN_H//2 - 60))
+        self.screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, SCREEN_H//2))
 
     # ------------- game over -------------
     def _trigger_game_over(self):

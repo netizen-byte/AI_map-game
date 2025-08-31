@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pygame
+from weapon import Weapon  # Import Weapon class
 
 from constants import TILE, ANIM_FPS, PLAYER_SPEED, PLAYER_MAX_HP
 
@@ -36,6 +37,10 @@ class Player:
             "walk_up":    ["sprites/Walk_up.png"],
             "walk_left":  ["sprites/Walk_left.png"],
             "walk_right": ["sprites/Walk_right.png"],
+            "attack_down":  ["sprites/Staystill.png"],  # Placeholder
+            "attack_up":    ["sprites/Stay_still_back.png"],  # Placeholder
+            "attack_left":  ["sprites/Stay_still_left.png"],  # Placeholder
+            "attack_right": ["sprites/Stay_still_right.png"]  # Placeholder
         }
         self.anim: Dict[str, List[pygame.Surface]] = {}
         for k, opts in candidates.items():
@@ -67,6 +72,12 @@ class Player:
         # Ensure knock attribute exists in Player class
         self.knock = pygame.Vector2(0, 0)  # transient knockback velocity
 
+        # Attack system
+        self.attacking = False  # To track if the player is attacking
+        self.attack_timer = 0  # Attack cooldown timer
+        self.weapon = None  # Hold weapon (sword)
+        self.attack_duration = 0.3  # Attack lasts for 0.3 seconds
+
         if Path("sprites/Hurt.png").exists():
             self.anim["hurt"] = _slice_strip(pygame.image.load("sprites/Hurt.png").convert_alpha())
 
@@ -87,22 +98,36 @@ class Player:
     def _read_input(self) -> None:
         k = pygame.key.get_pressed()
         if self.hurt_timer > 0 or self.dead:
+            # Suppress player-controlled movement while hurt/dead, but keep knockback
+            self.vel.update(0, 0)
             return
+        
         vx = (1 if (k[pygame.K_d] or k[pygame.K_RIGHT]) else 0) - (1 if (k[pygame.K_a] or k[pygame.K_LEFT]) else 0)
         vy = (1 if (k[pygame.K_s] or k[pygame.K_DOWN]) else 0) - (1 if (k[pygame.K_w] or k[pygame.K_UP]) else 0)
-        self.vel.update(vx, vy)
-        if self.vel.length_squared() > 0:
-            self.vel = self.vel.normalize() * PLAYER_SPEED
-            if abs(self.vel.x) > abs(self.vel.y):
-                self.facing = "right" if self.vel.x > 0 else "left"
-            else:
-                self.facing = "down" if self.vel.y > 0 else "up"
+
+        # Attack input: Spacebar
+        if k[pygame.K_SPACE] and not self.attacking:
+            self.attacking = True
+            self.attack_timer = self.attack_duration  # Start the attack
+            self.weapon = Weapon(self, groups=[])  # Create the sword/weapon
+
+        # Player movement (if not attacking)
+        if not self.attacking:
+            self.vel.update(vx, vy)
+            if self.vel.length_squared() > 0:
+                self.vel = self.vel.normalize() * PLAYER_SPEED
+                if abs(self.vel.x) > abs(self.vel.y):
+                    self.facing = "right" if self.vel.x > 0 else "left"
+                else:
+                    self.facing = "down" if self.vel.y > 0 else "up"
 
     def _set_anim(self, moving: bool) -> None:
         if self.dead:
             wanted = "dead" if "dead" in self.anim else f"idle_{self.facing}"
         elif self.hurt_timer > 0:
             wanted = "hurt" if "hurt" in self.anim else f"idle_{self.facing}"
+        elif self.attacking:
+            wanted = f"attack_{self.facing}"  # Use attack animation when attacking
         else:
             wanted = f"{'walk' if moving else 'idle'}_{self.facing}"
         if wanted != self.state:
@@ -118,6 +143,9 @@ class Player:
         while self.timer >= step:
             self.timer -= step
             if self.state == "dead":
+                if self.frame < len(frames) - 1:
+                    self.frame += 1
+            elif self.state.startswith("attack"):
                 if self.frame < len(frames) - 1:
                     self.frame += 1
             else:
@@ -141,23 +169,37 @@ class Player:
     # offset = camera/room offset; update works with world solids shifted to screen
     def update(self, dt: float, room, offset: Tuple[int,int]=(0,0)) -> None:
         self._read_input()
-        moving = self.vel.length_squared() > 0
+        # moving flag counts either input velocity (when allowed) or active knockback
+        moving = (self.vel.length_squared() > 0 and not self.attacking) or (self.knock.length_squared() > 6 and self.hurt_timer > 0)
         self._set_anim(moving)
 
-        if moving and not self.dead:
-            solids = room.solid_rects(offset)
+        if self.attacking:
+            self.attack_timer -= dt  # Countdown to end attack
+            if self.weapon:
+                self.weapon.update()
+            if self.attack_timer <= 0:
+                self.attacking = False  # End the attack
+                self.weapon = None
+
+        solids = room.solid_rects(offset)
+        # Apply player input movement (blocked while attacking or dead)
+        if not self.dead and not self.attacking and self.vel.length_squared() > 0:
             self._move_axis(self.vel.x * dt, 0, solids)
             self._move_axis(0, self.vel.y * dt, solids)
+
+        # Apply knockback while hurt
+        if self.hurt_timer > 0 and self.knock.length_squared() > 0:
+            self._move_axis(self.knock.x * dt, 0, solids)
+            self._move_axis(0, self.knock.y * dt, solids)
+            self.knock *= 0.88
+            if self.knock.length_squared() < 4:
+                self.knock.update(0, 0)
 
         self._animate(dt)
         if self.invuln_timer > 0:
             self.invuln_timer = max(0.0, self.invuln_timer - dt)
         if self.hurt_timer > 0:
             self.hurt_timer = max(0.0, self.hurt_timer - dt)
-            # apply knockback decay
-            self.rect.x += int(self.vel.x * dt)
-            self.rect.y += int(self.vel.y * dt)
-            self.vel *= 0.88
 
         # keep the smaller "feet" hitbox glued to the feet every frame
         self.hitbox.midbottom = self.rect.midbottom
@@ -180,8 +222,27 @@ class Player:
         v = pygame.Vector2(0, 1) if v.length_squared()==0 else v.normalize()
         if knockback is None:
             knockback = TILE / max(1e-3, duration)
-        self.vel = v * knockback
+        # store knockback separately so input doesn't cancel it
+        self.knock = v * knockback
         self.hurt_timer = duration
+
+    def draw(self, screen: pygame.Surface, off: Tuple[int,int]):
+        """Draw the player and weapon (if attacking). Sword appears in front except when facing up."""
+        if self.attacking and self.weapon:
+            # Update weapon position just before drawing
+            self.weapon.update()
+            if self.facing == 'up':
+                # sword behind player
+                self.weapon.draw(screen, off)
+                screen.blit(self.image, self.rect.move(off))
+                return
+            else:
+                # sword in front of player
+                screen.blit(self.image, self.rect.move(off))
+                self.weapon.draw(screen, off)
+                return
+        # default (no attack)
+        screen.blit(self.image, self.rect.move(off))
 
     def kill_instant(self) -> None:
         self.hp = 0
