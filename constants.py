@@ -21,3 +21,8 @@ HAZARD_TICK_SECONDS = 0.6
 HAZARD_GIDS = {82, 383}
 BOMB_GIDS = {349}
 BOMB_KILL_DELAY = 0.25
+
+LAMP_TILE_GIDS = {78}   # e.g. {312, 313}  ← put your torch GIDs here
+TRAP_TILE_GIDS = {82}
+
+ANIM_FPS = 8

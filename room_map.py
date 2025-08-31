@@ -4,8 +4,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple
 
-import pygame
 from constants import TILE, HAZARD_GIDS, BOMB_GIDS
+from constants import LAMP_TILE_GIDS, TRAP_TILE_GIDS, ANIM_FPS
+import pygame
+from pathlib import Path
+
+# Try to import a global animation FPS, fallback to 8 if not defined
+try:
+    from constants import ANIM_FPS as _GLOBAL_ANIM_FPS
+except Exception:
+    _GLOBAL_ANIM_FPS = 8
 
 # New: keys that mark a door layer (doors are walkable, but detected)
 DOOR_LAYER_KEYS = ("door", "doors")
@@ -48,9 +56,38 @@ class Room:
     hazards:     List[pygame.Rect]     = field(default_factory=list)  # NEW: hazard rects
     bombs:       List[pygame.Rect]     = field(default_factory=list)  # NEW: bomb rects
 
-    # draw pre-rendered room
+    # NEW: animated overlay objects (e.g., torches, traps)
+    # Each entry: {"rect": pygame.Rect, "frames": [Surface,...], "fps": int}
+    animated_objects: list = field(default_factory=list)
+
+    # draw pre-rendered room + animated overlays
     def draw(self, screen: pygame.Surface, offset: Tuple[int, int]) -> None:
         screen.blit(self.surf, offset)
+
+        if not self.animated_objects:
+            return
+
+        # Current animation tick
+        ticks = pygame.time.get_ticks()
+        for obj in self.animated_objects:
+            frames: list[pygame.Surface] = obj.get("frames") or []
+            fps: int = int(obj.get("fps") or _GLOBAL_ANIM_FPS or 8)
+            rect: pygame.Rect = obj["rect"]
+
+            if not frames:
+                # Fallback: subtle alpha pulse if frames missing
+                # (keeps things visible even if sprite not found)
+                pulse = (pygame.math.sin(ticks * 0.005) + 1.0) * 0.25 + 0.5  # 0.5..1.0
+                tmp = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+                tmp.fill((255, 255, 255, int(255 * pulse)))
+                screen.blit(tmp, (rect.x - offset[0], rect.y - offset[1]))
+                continue
+
+            # Advance frame based on time
+            period_ms = max(1, int(1000 / max(1, fps)))
+            idx = (ticks // period_ms) % len(frames)
+            img = frames[idx]
+            screen.blit(img, (rect.x - offset[0], rect.y - offset[1]))
 
     # door rectangles (world coords; shift by offset for screen coords)
     def door_rects(self, offset: Tuple[int,int]|None=None) -> List[pygame.Rect]:
@@ -109,6 +146,9 @@ class RoomMap:
         self._solids_dirty: bool = False  # new flag
         self.current_room: Room | None = None  # NEW
 
+        # NEW: cache of sliced animation frames by filename
+        self._anim_cache: dict[str, list[pygame.Surface]] = {}
+
     @staticmethod
     def _is(layer_name: str, needle: str) -> bool:
         return needle.lower() in layer_name.lower()
@@ -116,6 +156,20 @@ class RoomMap:
     @staticmethod
     def _gid_to_xy(i: int, width: int) -> Tuple[int,int]:
         return i % width, i // width
+
+    @staticmethod
+    
+    def _slice_square_strip(sheet: pygame.Surface) -> list[pygame.Surface]:
+        """Split a horizontal strip into square frames (frame_w == sheet_h)."""
+        h = sheet.get_height()
+        if h <= 0:
+            return [sheet]
+        count = max(1, sheet.get_width() // h)
+        frames = []
+        for i in range(count):
+            r = pygame.Rect(i * h, 0, h, h)
+            frames.append(sheet.subsurface(r).copy())
+        return frames
 
     def _load_external_tsx_image(self, tsx_path: Path) -> Path|None:
         if not tsx_path.exists(): return None
@@ -209,8 +263,9 @@ class RoomMap:
         back_spawn_cells: list[tuple[int,int]] = []  # NEW
         object_solids: list[pygame.Rect] = []  # moved: now for all rooms
         hazards: list[pygame.Rect] = []       # NEW
-
         bombs: list[pygame.Rect] = []
+        animated_objects: list = []           # NEW: torch/trap renderers
+
         for layer in data["layers"]:
             ltype = layer.get("type")
             if ltype == "tilelayer":
@@ -250,7 +305,7 @@ class RoomMap:
                         floor_cells.append((x, y))
                     elif any(k in lname for k in DOOR_LAYER_KEYS):
                         door_cells.append((x, y))
-                    elif gid in HAZARD_GIDS:                          
+                    elif gid in HAZARD_GIDS:
                         hazards.append(tile_rect)
                     elif gid in BOMB_GIDS:
                         hazards.append(tile_rect)
@@ -258,24 +313,34 @@ class RoomMap:
                     elif any(k in lname for k in HAZARD_LAYER_KEYS):   # layer named "trap/lava/hazard"
                         hazards.append(tile_rect)
                     elif any(k in lname for k in DECOR_LAYER_KEYS):
-                        pass                                           # still walkable, but not harmful unless GID matched above
+                        pass
                     elif "wall" in lname or "solid" in lname:
                         solid_cells.append((x, y))
                     else:
                         pass
 
-                    # Additional classification by source image name
+                    # --- NEW: animated torch/trap overlays by image filename ---
                     img_name = (gid_to_image.get(gid) or "").lower()
-                    atlas_img = Path(ts_defs[atlas_i].get("image", "")).name.lower() if atlas_i is not None else ""
-                    # Only classify by filename for image-collection tiles where we know exact file names
-                    if img_name:
-                        if img_name in ("lava.png", "volcanoe_tiles.png"):
-                            hazards.append(pygame.Rect(x*tw, y*th, tw, th))
-                        if img_name in ("icon41.png",):
-                            rect_full = pygame.Rect(x*tw, y*th, tw, th)
-                            hazards.append(rect_full)
-                            bombs.append(rect_full.inflate(-6, -6))
-                            
+                    if img_name in ("lamp.png", "trap.png"):
+                        # Load and slice once; reuse from cache
+                        frames = self._anim_cache.get(img_name) 
+                        if not frames:
+                            sheet_path = Path("sprites") / img_name
+                            if sheet_path.exists():
+                                try:
+                                    sheet = pygame.image.load(sheet_path.as_posix()).convert_alpha()
+                                    frames = self._slice_square_strip(sheet)
+                                except Exception:
+                                    frames = []
+                            else:
+                                frames = []
+                            self._anim_cache[img_name] = frames
+
+                        animated_objects.append({
+                            "rect": tile_rect,
+                            "frames": frames,
+                            "fps": _GLOBAL_ANIM_FPS,
+                        })
 
             elif ltype == "objectgroup":
                 lname = layer.get("name", "").lower()
@@ -297,7 +362,6 @@ class RoomMap:
                             if img == "icon41.png":
                                 hazards.append(r.copy())
                                 bombs.append(r.inflate(-6, -6))
-                                
 
         door_set = set(door_cells)
 
@@ -328,7 +392,8 @@ class RoomMap:
             spawn_override=spawn_override,
             back_spawn_override=back_spawn_override,  # NEW
             hazards=hazards,
-            bombs=bombs
+            bombs=bombs,
+            animated_objects=animated_objects,        # NEW
         )
         self.current_room = room  # NEW: track for dynamic solid updates
         if player is not None:
@@ -446,7 +511,5 @@ class RoomMap:
                         setattr(player, attr, name)
                         return
                     except Exception:
-                        continue
-        # If nothing worked, silently ignore
                         continue
         # If nothing worked, silently ignore

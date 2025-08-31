@@ -137,7 +137,7 @@
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 0, 0, 0, 0, 0, 0, 14, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -233,7 +233,7 @@
         {
          "columns":7,
          "firstgid":1,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/wallfloor.png",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/wallfloor.png",
          "imageheight":256,
          "imagewidth":224,
          "margin":0,
@@ -246,7 +246,7 @@
         {
          "columns":11,
          "firstgid":57,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/post_apoc_office_furniture_set_updated.webp",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/post_apoc_office_furniture_set_updated.webp",
          "imageheight":448,
          "imagewidth":352,
          "margin":0,
@@ -259,7 +259,7 @@
         {
          "columns":10,
          "firstgid":211,
-         "image":"..\/..\/..\/Downloads\/ai project1\/ai project1\/volcanoe_assets.webp",
+         "image":"..\/..\/Downloads\/ai project1\/ai project1\/volcanoe_assets.webp",
          "imageheight":288,
          "imagewidth":320,
          "margin":0,

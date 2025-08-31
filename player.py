@@ -47,23 +47,31 @@ class Player:
         self.timer  = 0.0
         self.image  = self.anim[self.state][self.frame]
         self.rect   = self.image.get_rect(center=spawn_xy)
-        # smaller hitbox used for hazard checks (not movement)
-        self.hitbox = self.rect.inflate(-8, -8)
+
+        # --- FEET-ONLY HITBOX ---
+        # narrower and shorter; anchored to the feet so only "stepping on" hurts
+        hb = self.rect.copy()
+        hb.width  = int(hb.width * 0.60)    # ~60% of sprite width
+        hb.height = int(hb.height * 0.35)   # bottom ~35% of sprite height
+        hb.midbottom = self.rect.midbottom  # align with feet
+        self.hitbox = hb
+
         self.vel    = pygame.Vector2(0, 0)
         # health
         self.max_hp = PLAYER_MAX_HP
         self.hp = PLAYER_MAX_HP
-        self.invuln_timer = 0.0  # used for brief hit flash if desired
+        self.invuln_timer = 0.0
         self.hurt_timer = 0.0
         self.dead = False
+
+        # Ensure knock attribute exists in Player class
+        self.knock = pygame.Vector2(0, 0)  # transient knockback velocity
 
         if Path("sprites/Hurt.png").exists():
             self.anim["hurt"] = _slice_strip(pygame.image.load("sprites/Hurt.png").convert_alpha())
 
-        # optional extra animations
         if Path("sprites/Die.png").exists():
             self.anim["dead"] = _slice_strip(pygame.image.load("sprites/Die.png").convert_alpha())
-        # fallback hurt animation uses idle frame flash (no extra art needed)
         
     def set_state(self, name: str) -> None:
         """Force an animation immediately (used on room enter)."""
@@ -71,9 +79,10 @@ class Player:
             self.state, self.facing, self.frame, self.timer = name, name.split("_")[-1], 0, 0.0
             self.image = self.anim[name][0]
 
-
     def teleport(self, xy: Tuple[int,int]) -> None:
         self.rect.center = xy
+        # keep feet hitbox glued to feet after teleports
+        self.hitbox.midbottom = self.rect.midbottom
 
     def _read_input(self) -> None:
         k = pygame.key.get_pressed()
@@ -149,8 +158,9 @@ class Player:
             self.rect.x += int(self.vel.x * dt)
             self.rect.y += int(self.vel.y * dt)
             self.vel *= 0.88
-        # keep hitbox centered on rect
-        self.hitbox.center = self.rect.center
+
+        # keep the smaller "feet" hitbox glued to the feet every frame
+        self.hitbox.midbottom = self.rect.midbottom
 
     def heal_full(self) -> None:
         self.hp = self.max_hp
@@ -160,6 +170,8 @@ class Player:
             return
         self.hp = max(0, self.hp - amount)
         self.invuln_timer = 0.2
+        # Play the hit sound every time the player takes damage
+        hit_sound.play()
 
     def hurt_from(self, source_pos, knockback: float=None, duration: float=0.18) -> None:
         if self.dead: return
@@ -177,7 +189,22 @@ class Player:
         self.invuln_timer = 0.0
         self.hurt_timer   = 0.0
         self.vel.update(0, 0)
+        self.knock.update(0, 0)
         if "dead" in self.anim:
             self.state = "dead"
         self.frame = 0
         self.timer = 0.0
+
+        # Play death sound when player dies
+        death_sound.play()
+
+# Initialize the mixer
+pygame.mixer.init()
+
+# Load hit sound at the top of player.py (near other imports)
+hit_sound = pygame.mixer.Sound('audio/hit.wav')
+hit_sound.set_volume(0.5)  # Adjust volume if necessary
+
+# Load death sound at the top of player.py (near other imports)
+death_sound = pygame.mixer.Sound('audio/death.wav')
+death_sound.set_volume(0.5)  # Adjust volume if necessary

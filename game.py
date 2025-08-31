@@ -9,6 +9,9 @@ from player import Player
 
 from UCS import ucs_new
 
+from boss import Boss
+
+
 
 class TextBox:
     def __init__(self, font: pygame.font.Font):
@@ -94,16 +97,23 @@ class Game:
         self.screen = screen
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 28)
-        self.map = RoomMap("maps", "sprites_en")
-        candidates = ["room1.json","room2.json","room3.json"]
-        self.rooms: List[str] = [r for r in candidates if (Path("maps")/r).exists()] or [room_json]
+        
+        # Pick 'map' if it exists, else fall back to 'maps'
+        map_dir = "map" if (Path("map")/"room1.json").exists() else "maps"
+        self.map = RoomMap(map_dir, "sprites_en")
+
+        # Collect all roomN.json present so door_graph targets (like room12) exist
+        candidates = [f"room{i}.json" for i in range(1, 21)]
+        self.rooms: List[str] = [r for r in candidates if (Path(map_dir)/r).exists()] or ["room1.json"]
         self.cur = 0
         self.room = self.map.load_json_room(self.rooms[self.cur])
+        
         sx, sy = self.room.get_spawn_point()
         self.player = Player((sx, sy))
         self._door_block_rect: pygame.Rect | None = None
         # Door graph (forward links only; reverse links auto-added below).
         # NOTE: User mapping (1-based door numbers in request -> 0-based here):
+        self.boss = None  
 
         self.door_graph: dict[str, dict[int, tuple[str,int]]] = {
             "room1.json": { 0: ("room2.json", 0) },
@@ -278,6 +288,16 @@ class Game:
         self.cur = self.rooms.index(target_room_name)
         # load room using existing player object so rect is preserved
         self.room = self.map.load_json_room(self.rooms[self.cur], player=self.player)
+        cur_room_name = self.rooms[self.cur]
+        cur_room = self.rooms[self.cur]
+        if cur_room == "room12.json":
+            rw, rh = self.room.pixel_size
+            # center of the room
+            center_x = rw // 2
+            center_y = rh // 2
+            self.boss = Boss((center_x, center_y))
+        else:
+            self.boss = None
         self._spawn_after_entry(target_door_index, is_back)
 
         # Ensure idle state after placement
@@ -342,7 +362,7 @@ class Game:
     def _spawn_after_entry(self, door_index: int, is_back: bool):
         """Contextual spawn handling for forward/back travel.
 
-        Forward: always spawn in front (below) door.
+        Forward: always spawn in front of door.
         Back: if door is at bottom edge -> spawn inside (above) door.
               if door is at top edge -> spawn in front (below) door (so player not outside).
               otherwise fallback to inside placement.
@@ -465,6 +485,17 @@ class Game:
             self.player.update(dt, self.room)
             # If we just entered, only clear the flag once the player has
             # moved away from the spawn center to avoid immediate re-trigger.
+            
+            if self.boss and not self.confirm.active and not self.game_over:
+                self.boss.update(dt, self.room, self.player)
+
+                # If the boss reduced the player's HP to 0, trigger your normal death flow.
+                if self.player.hp <= 0 and not getattr(self.player, "dead", False):
+                    # flip to the Die.png animation then show Game Over overlay
+                    if hasattr(self.player, "kill_instant"):
+                        self.player.kill_instant()
+                    self._start_death_sequence(0.8)  # short beat for the death anim
+                
             if getattr(self, "just_entered_room", False):
                 ex, ey = getattr(self, "_entry_spawn_center", (0, 0))
                 px, py = self.player.rect.center
@@ -486,6 +517,21 @@ class Game:
         self.screen.fill((18, 22, 28))
         off = self.offset
         self.room.draw(self.screen, off)
+        # >>> draw the boss (was missing)
+        if self.boss:
+            self.boss.draw(self.screen, off)
+
+        # check win and prompt
+        if self.boss and self.boss.is_dead():
+            self.confirm.show(
+                "You defeated the Raccoon Boss!\nReturn to the beginning?",
+                confirm=True,
+                confirm_hint="(Enter = Yes / Esc = No)",
+                on_yes=lambda: self._restart_to_room1(),
+                on_no=lambda: self.confirm.cancel()
+            )
+            self.boss = None
+
         self.screen.blit(self.player.image, self.player.rect.move(off))
         if self.show_door_ids:
             self._draw_door_id_overlay(off)
@@ -644,3 +690,9 @@ class Game:
         except Exception:
             pass
         self.__init__(self.screen, room_json="room1.json")
+
+
+pygame.mixer.init()
+pygame.mixer.music.load('audio/main.ogg')  # path to your main theme
+pygame.mixer.music.set_volume(0.5)   # optional volume adjustment
+pygame.mixer.music.play(-1, 0.0)     # -1 means loop indefinitely, start at 0.0s
