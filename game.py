@@ -159,17 +159,28 @@ class Game:
 
         # ------------- UCS Integration Starts Here -------------
         self.ucs_nodes = {}
+        trap_room = random.choice([r for r in self.rooms if r != room_json])
+        
         for room_name in self.rooms:
-            danger_cost = 1
-            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=False)
+            if room_name == trap_room:
+                danger_cost = 10
+                trap = True
+            else:
+                danger_cost = random.randint(1,5)
+                trap = False
+            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=trap) #create a dict where key is room name and value is Node object
+            print(f"this is trap room: {trap_room} with danger cost {danger_cost}") if room_name == trap_room else None
         for src_room_name, mappings in self.door_graph.items():
             if src_room_name in self.ucs_nodes:
                 for local_idx, (dst_room_name, _) in mappings.items():
                     if dst_room_name in self.ucs_nodes:
                         self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
         start_node_name = room_json
-        goal_node_name = "room12.json"
+        goal_node_name = random.choice([f"room{i}.json" for i in range(2, 13)]) #randomly choose a goal node from room2 to room12
+        # print(goal_node_name)
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
+        print(self.ucs_game.get_least_cost_to_goal())
+        # print(f"{self.ucs_game.uniform_cost_search(self.ucs_game.start, self.ucs_game.goal)}")
         # ------------- UCS Integration Ends Here -------------
 
         # Misc gameplay state
@@ -179,7 +190,7 @@ class Game:
         self.win_screen = False
 
 
-    def display_UCS(self):
+    def display_UCS(self): 
         cur_name = self.rooms[self.cur]
         current_node = self.ucs_nodes.get(cur_name)
         if not current_node:
@@ -187,7 +198,8 @@ class Game:
 
         # Call the UCS algorithm to get the shortest path and cost
         cost, path = self.ucs_game.uniform_cost_search(current_node, self.ucs_game.goal)
-        
+
+        #Also is a shortest path from current node to goal node
         if cost == float("inf"):
             return "There is no path to the goal from here."
         else:
@@ -195,7 +207,7 @@ class Game:
             path_str = "-> ".join(path_names)
             return f"Shortest path is: {path_str}."
         
-    def _draw_ucs_path(self):
+    def _draw_ucs_path(self): #draw the string from function above to pygame screen
         if not hasattr(self, "ucs_game") or not self.ucs_game:
             return
         
@@ -313,6 +325,7 @@ class Game:
         self.just_entered_room = True
         self._entry_spawn_center = tuple(self.player.rect.center)
 
+
     def _place_player_after_enter(self, is_back: bool, door_index: int):
         # (kept for compatibility but no longer used)
         pass
@@ -334,9 +347,23 @@ class Game:
             elif cy_front >= self.room.pixel_size[1]:
                 cy_front = int((dy - 0.5) * TILE)
             self.player.rect.center = (cx, cy_front)
+            
+            # ---------- Check for UCS goal ----------
+            if hasattr(self, "ucs_game"):
+                cur_name = self.rooms[self.cur]
+                if cur_name == self.ucs_game.goal.name:
+                    self.win_screen = True
+                    if hasattr(self, "confirm"):
+                        self.confirm.show(
+                            f"You have reached the goal room: {cur_name.replace('.json','')}!\nCongratulations!",
+                            confirm=False
+                        )
+                elif self.ucs_game.nodes[cur_name].trap:
+                    self.game_over = True
         else:
             sx, sy = self.room.get_spawn_point()
             self.player.rect.center = (sx, sy)
+
 
     def _spawn_at_door_inside(self, door_index: int = 0):
         """Place player just inside (above) the given door index (used on back travel)."""
@@ -426,6 +453,7 @@ class Game:
         self._door_block_rect = door_rect.inflate(-TILE // 4, -TILE // 4)
 
     def _check_door_trigger(self):
+
         if self.confirm.active:
             return
         # Prevent confirm dialog immediately after entering room
@@ -446,12 +474,14 @@ class Game:
                 target_room, target_door = links[idx]
                 # build message: per-room hint (or global extra) as main text,
                 # and a small confirm hint at bottom-right.
-                hint_main = self.room_hints.get(cur_name) or self.door_confirm_extra or ""
+                # hint_main = self.room_hints.get(cur_name) or self.door_confirm_extra or ""
+                hint_main = self.ucs_game.generate_hint(self.ucs_nodes[target_room].danger_cost)
+
                 if hint_main:
                     msg = hint_main
                 else:
                     msg = f"You are at {cur_name}."
-                confirm_hint = f"Do you still want to go?"
+                confirm_hint = f"Do you still want to go to {target_room.replace('.json', '')}?"
                 self.confirm.show(
                     msg,
                     confirm=True,
@@ -575,6 +605,7 @@ class Game:
 
         #draw UCS
         self._draw_ucs_path()  # now shows top-right
+        self._draw_current_room_name()
 
         self.confirm.draw(self.screen)
         # delayed game over after death anim
@@ -646,6 +677,17 @@ class Game:
                    self._bomb_center[1] + off[1] - img.get_height()//2)
             self.screen.blit(img, pos)
             self._bomb_index += 1
+    
+    def _draw_current_room_name(self):
+        # small font for overlay
+        small_font = pygame.font.Font(None, 24)
+        cur_room_name = self.rooms[self.cur].replace(".json", "")  # remove .json if you want
+        text_surf = small_font.render(f"Room: {cur_room_name}", True, (255, 255, 200))
+        
+        # bottom-left position with 20px padding
+        x = 20
+        y = SCREEN_H - text_surf.get_height() - 20
+        self.screen.blit(text_surf, (x, y))
 
     # ------------- health bar -------------
     def _draw_health_bar(self):

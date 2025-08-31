@@ -2,17 +2,17 @@ import heapq
 import itertools
 
 class Node:
-    def __init__(self, name, danger_cost=1, trap=False):
+    def __init__(self, name, danger_cost, trap=False):
         self.name = name
         self.doors = {}  # door_name -> (connected_node, cost)
         self.danger_cost = danger_cost
         self.trap = trap
 
-    def add_door(self, door_name, node, cost=1):
+    def add_door(self, door_name, node, cost):
         self.doors[door_name] = (node, cost)
 
     def __repr__(self):
-        return f"Node({self.name})"
+        return f"Node({self.name, self.danger_cost, self.trap})"
 
 
 class UCSGame:
@@ -44,6 +44,7 @@ class UCSGame:
                 return cost, new_path
 
             for neighbor, edge_cost in current.doors.values():
+
                 total_cost = cost + neighbor.danger_cost + edge_cost
                 heapq.heappush(frontier, (total_cost, next(counter), neighbor, new_path))
 
@@ -60,13 +61,13 @@ class UCSGame:
     def generate_hint(self, danger_cost):
         """Intuitive hint based on danger cost (higher cost = riskier)"""
         if danger_cost >= 5:
-            return "⚠️ Seems risky"
+            return "You are lack of aura, go farm more. This room is not for you"
         elif danger_cost >= 3:
-            return "⚠️ Could be dangerous"
+            return "You aura is not on my level yet, be sligyhtly careful"
         elif danger_cost >= 2:
-            return "⚠️ Slightly risky"
+            return "You are almost there, you mogged most of the people"
         else:
-            return "✅ Looks safe"
+            return "Infinite aura, you are safe"
 
     def move_to(self, door_name):
         if door_name not in self.current.doors:
