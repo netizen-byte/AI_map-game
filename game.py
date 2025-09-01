@@ -353,8 +353,8 @@ class Game:
         else:
             path_names = [n.name.replace(".json", "") for n in path]
             path_str = "-> ".join(path_names)
-            return f"Shortest path is: {path_str}."
-        
+            return f"Safest path is: {path_str}."
+
     def _draw_ucs_path(self): #draw the string from function above to pygame screen
         if not hasattr(self, "ucs_game") or not self.ucs_game:
             return
