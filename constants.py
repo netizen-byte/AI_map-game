@@ -1,5 +1,5 @@
 # --- screen & timing ---
-SCREEN_W, SCREEN_H = 960, 540
+SCREEN_W, SCREEN_H = 1280, 720 
 FPS = 60
 ANIM_FPS = 8
 

@@ -154,6 +154,8 @@ class TutorialScene(BaseScene):
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+    # flags = pygame.FULLSCREEN | pygame.SCALED
+    # screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
     pygame.display.set_caption("Dungeon escape")
 
     scene: BaseScene = TitleScene(screen)
