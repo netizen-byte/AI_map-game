@@ -1,6 +1,11 @@
 import pygame
 from constants import SCREEN_W, SCREEN_H
 from game import Game
+import ctypes
+import sys
+
+if sys.platform == "win32":
+    ctypes.windll.user32.SetProcessDPIAware()
 
 class BaseScene:
     def __init__(self, screen: pygame.Surface):
@@ -154,6 +159,7 @@ class TutorialScene(BaseScene):
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+    # for fullscreen
     # flags = pygame.FULLSCREEN | pygame.SCALED
     # screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
     pygame.display.set_caption("Dungeon escape")
