@@ -77,6 +77,9 @@ class TextBox:
             hint = self.font.render(self.confirm_hint or "(Y/N)", True, (200,200,210))
             w = max(w, hint.get_width() + padding*2)
             h += hint.get_height() + 8
+            overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 140))
+            screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, SCREEN_H//2))
         rect = pygame.Rect((SCREEN_W-w)//2, (SCREEN_H-h)//2, w, h)
         shadow = rect.move(6,6)
         pygame.draw.rect(screen, self.shadow, shadow, border_radius=10)
@@ -941,6 +944,12 @@ class Game:
                 elif ev.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_restart_click()
                 continue
+            if self.win_screen:
+                if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    self._restart_to_room1()
+                elif ev.type == pygame.MOUSEBUTTONDOWN:
+                    self._restart_to_room1()
+                continue
             else:
                 self.confirm.handle_event(ev)
                 if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
@@ -948,6 +957,11 @@ class Game:
                         self.show_map_graph = not self.show_map_graph
                     elif self.ucs_button_rect.collidepoint(ev.pos):
                         self.show_ucs_graph = not self.show_ucs_graph
+                if ev.type == pygame.KEYDOWN and not self.confirm.active:
+                    if ev.key == pygame.K_r:
+                        msg = "Restart from room1 now?"
+                        hint = "Y = Yes    •    N = No"
+                        self.confirm.show(msg, confirm=True, on_yes=self._restart_to_room1, on_no=None, confirm_hint=hint)
 
         if not self.confirm.active and not self.game_over:
             self.player.update(dt, self.room)
