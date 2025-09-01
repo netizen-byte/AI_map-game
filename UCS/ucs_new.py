@@ -68,7 +68,7 @@ class UCSGame:
             return "You are almost there, you mogged most of the people"
         else:
             return "Infinite aura, you are safe"
-
+    
     def move_to(self, door_name):
         if door_name not in self.current.doors:
             return False

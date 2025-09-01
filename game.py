@@ -145,9 +145,9 @@ class Game:
             "room2.json": {0: ("room3.json", 0), 2: ("room11.json", 2)},
             "room3.json": {1: ("room4.json", 0)},
             "room4.json": {1: ("room11.json", 1)},
-            "room5.json": {0: ("room7.json", 2)},
+            "room5.json": {},
             "room6.json": {1: ("room9.json", 1)},
-            "room7.json": {0: ("room2.json", 1)},
+            "room7.json": {0: ("room2.json", 1), 2: ("room5.json", 0)},
             "room8.json": {0: ("room9.json", 0), 1: ("room7.json", 1)},
             "room9.json": {},
             "room10.json": {0: ("room11.json", 0), 1: ("room12.json", 0)},
@@ -173,11 +173,11 @@ class Game:
         self.door_graph_D = {
             "room1.json": {0: ("room9.json", 1)},
             "room2.json": {0: ("room6.json", 0), 1: ("room4.json", 0), 2: ("room3.json", 0)},
-            "room3.json": {1: ("room11.json", 1)},
+            "room3.json": {0: ("room2.json", 2), 1: ("room11.json", 1)},
             "room4.json": {1: ("room5.json", 0)},
             "room5.json": {},
             "room6.json": {1: ("room8.json", 1)},
-            "room7.json": {0: ("room10.json", 1), 1: ("room11.json", 2), 2: ("room12.json", 0git )},
+            "room7.json": {0: ("room10.json", 1), 1: ("room11.json", 2), 2: ("room12.json", 0)},
             "room8.json": {0: ("room9.json", 0)},
             "room9.json": {},
             "room10.json": {1: ("room11.json", 0)},
@@ -293,41 +293,39 @@ class Game:
             "room1.json": "A quiet library. A soft light glows to the north.",
             "room2.json": "Storage room — might be useful items here.",
         }
+        # --- Map / Graph UI State ---
+        self.visited_rooms = {self.rooms[self.cur]}
+        self.show_map_graph = False
+        self.show_ucs_graph = False
+        import pygame as _pg  # safe alias
+        self.map_button_rect = _pg.Rect(20, 42, 28, 22)
+        self.ucs_button_rect = _pg.Rect(self.map_button_rect.right + 8, 42, 28, 22)
+        self._build_room_graph_layout()
 
         # ------------- UCS Integration Starts Here -------------
         self.ucs_nodes = {}
-        # Pick a trap room but never choose the final boss room (room12.json)
         trap_candidates = [r for r in self.rooms if r != room_json and r != "room12.json"]
         if not trap_candidates:
             trap_candidates = [r for r in self.rooms if r != room_json]
         trap_room = random.choice(trap_candidates) if trap_candidates else None
-
         for room_name in self.rooms:
             if trap_room is not None and room_name == trap_room:
-                danger_cost = 10
-                trap = True
+                danger_cost = 10; trap = True
             else:
-                danger_cost = random.randint(1,5)
-                trap = False
-            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=trap) #create a dict where key is room name and value is Node object
-            print(f"this is trap room: {trap_room} with danger cost {danger_cost}") if room_name == trap_room else None
+                danger_cost = random.randint(1,5); trap = False
+            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=trap)
+            if room_name == trap_room:
+                print(f"this is trap room: {trap_room} with danger cost {danger_cost}")
         for src_room_name, mappings in self.door_graph.items():
             if src_room_name in self.ucs_nodes:
                 for local_idx, (dst_room_name, _) in mappings.items():
                     if dst_room_name in self.ucs_nodes:
                         self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
         start_node_name = room_json
-        # Use room12.json as deterministic goal when available; otherwise fall back
-        # to a safe choice among existing rooms (preserves previous behavior only
-        # if room12 is not present).
         if "room12.json" in self.rooms:
             goal_node_name = "room12.json"
-        # else:
-        #     goal_node_name = random.choice([r for r in self.rooms if r != start_node_name]) if len(self.rooms) > 1 else start_node_name
-        # print(goal_node_name)
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
         print(self.ucs_game.get_least_cost_to_goal())
-        # print(f"{self.ucs_game.uniform_cost_search(self.ucs_game.start, self.ucs_game.goal)}")
         # ------------- UCS Integration Ends Here -------------
 
         # Misc gameplay state
@@ -436,6 +434,243 @@ class Game:
         except Exception as e:
             print("[Doors] error", e)
 
+    # ------------ map graph (layout + drawing) ------------
+    def _build_room_graph_layout(self):
+        """Compute a simple layered (BFS) layout for the door_graph starting from room1.json.
+        Stores positions in self._room_graph_layout: room -> (x,y) (graph space)."""
+        from collections import deque, defaultdict
+        graph = {}
+        # Build undirected adjacency for layout purposes
+        for src, mapping in self.door_graph.items():
+            graph.setdefault(src, set())
+            for _, (dst, _dst_i) in mapping.items():
+                graph.setdefault(dst, set())
+                graph[src].add(dst)
+                graph[dst].add(src)
+        root = "room1.json" if "room1.json" in graph else (next(iter(graph)) if graph else None)
+        if not root:
+            self._room_graph_layout = {}
+            return
+        level = {root: 0}
+        q = deque([root])
+        order = [root]
+        while q:
+            cur = q.popleft()
+            for nb in sorted(graph[cur]):
+                if nb not in level:
+                    level[nb] = level[cur] + 1
+                    q.append(nb)
+                    order.append(nb)
+        buckets = defaultdict(list)
+        for r, lv in level.items():
+            buckets[lv].append(r)
+        # sort rooms in each level for stable layout
+        for lv in buckets:
+            buckets[lv].sort()
+        # assign coordinates
+        x_spacing = 70
+        y_spacing = 60
+        margin_x = 16
+        margin_y = 8
+        layout = {}
+        for lv, rooms in buckets.items():
+            width = (len(rooms) - 1) * x_spacing
+            start_x = margin_x - width // 2
+            for idx, rname in enumerate(rooms):
+                x = start_x + idx * x_spacing
+                y = margin_y + lv * y_spacing
+                layout[rname] = (x, y)
+        self._room_graph_layout = layout
+
+    def _draw_map_graph(self):
+        if not getattr(self, "map_button_rect", None):
+            return
+        small = pygame.font.Font(None, 20)
+        # Draw toggle button
+        btn_color = (70, 70, 90)
+        pygame.draw.rect(self.screen, btn_color, self.map_button_rect, border_radius=5)
+        arrow = "▲" if self.show_map_graph else "▼"
+        a_surf = small.render(arrow, True, (235,235,240))
+        self.screen.blit(a_surf, (self.map_button_rect.centerx - a_surf.get_width()//2,
+                                  self.map_button_rect.centery - a_surf.get_height()//2))
+        if not self.show_map_graph:
+            self._map_panel_rect = None
+            return
+        layout = getattr(self, "_room_graph_layout", {})
+        if not layout:
+            self._map_panel_rect = None
+            return
+        # Panel sizing
+        xs = [p[0] for p in layout.values()]
+        ys = [p[1] for p in layout.values()]
+        if not xs or not ys:
+            self._map_panel_rect = None
+            return
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        pad = 50
+        panel_w = (max_x - min_x) + pad
+        panel_h = (max_y - min_y) + pad
+        panel_x = 20
+        panel_y = self.map_button_rect.bottom + 4
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+        self._map_panel_rect = panel_rect
+        pygame.draw.rect(self.screen, (24,28,34), panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (90,100,120), panel_rect, 2, border_radius=8)
+        # Draw edges first
+        # Build undirected edge set to avoid duplicates
+        drawn = set()
+        for src, mapping in self.door_graph.items():
+            for _, (dst, _di) in mapping.items():
+                a = tuple(sorted((src, dst)))
+                if a in drawn: continue
+                if src not in layout or dst not in layout: continue
+                drawn.add(a)
+                x1, y1 = layout[src]
+                x2, y2 = layout[dst]
+                x1 += panel_x + pad//2 - min_x
+                y1 += panel_y + pad//2 - min_y
+                x2 += panel_x + pad//2 - min_x
+                y2 += panel_y + pad//2 - min_y
+                col = (70,90,110)
+                # brighten if both visited
+                if src in self.visited_rooms and dst in self.visited_rooms:
+                    col = (120,150,190)
+                pygame.draw.line(self.screen, col, (x1, y1), (x2, y2), 2)
+        # Draw nodes
+        for room, (lx, ly) in layout.items():
+            x = lx + panel_x + pad//2 - min_x
+            y = ly + panel_y + pad//2 - min_y
+            r = pygame.Rect(0,0,30,20)
+            r.center = (x, y)
+            if room == self.rooms[self.cur]:
+                fill = (255,210,110)
+            elif room in self.visited_rooms:
+                fill = (170,175,190)
+            else:
+                fill = (80,85,100)
+            pygame.draw.rect(self.screen, fill, r, border_radius=5)
+            pygame.draw.rect(self.screen, (20,20,24), r, 2, border_radius=5)
+            label = room.replace(".json", "").replace("room", "R")
+            ls = small.render(label, True, (10,10,14))
+            if ls.get_width() > r.width - 4:
+                # scale down maybe shorter label
+                label = label[:3]
+                ls = small.render(label, True, (10,10,14))
+            self.screen.blit(ls, (r.centerx - ls.get_width()//2, r.centery - ls.get_height()//2))
+
+    def _draw_ucs_graph(self):
+        if not hasattr(self, "ucs_game") or not self.ucs_game:
+            return
+        # Draw UCS toggle button (second button)
+        small = pygame.font.Font(None, 20)
+        btn_color = (70,70,90)
+        pygame.draw.rect(self.screen, btn_color, self.ucs_button_rect, border_radius=5)
+        arrow = "▲" if self.show_ucs_graph else "▼"
+        surf = small.render(arrow, True, (235,235,240))
+        self.screen.blit(surf, (self.ucs_button_rect.centerx - surf.get_width()//2,
+                                 self.ucs_button_rect.centery - surf.get_height()//2))
+        if not self.show_ucs_graph:
+            self._ucs_panel_rect = None
+            return
+        layout = getattr(self, "_room_graph_layout", {})
+        if not layout:
+            self._ucs_panel_rect = None
+            return
+        # Determine panel position; if map panel open, place to right, else below button
+        pad = 50
+        xs = [p[0] for p in layout.values()]
+        ys = [p[1] for p in layout.values()]
+        if not xs or not ys:
+            self._ucs_panel_rect = None
+            return
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        panel_w = (max_x - min_x) + pad
+        panel_h = (max_y - min_y) + pad
+        # If map panel exists and is open, try to position to the right, else align with button
+        if getattr(self, "_map_panel_rect", None):
+            panel_x = self._map_panel_rect.right + 12
+            panel_y = self._map_panel_rect.y
+        else:
+            panel_x = self.ucs_button_rect.x
+            panel_y = self.ucs_button_rect.bottom + 4
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+        self._ucs_panel_rect = panel_rect
+        pygame.draw.rect(self.screen, (26,30,38), panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (110,120,150), panel_rect, 2, border_radius=8)
+
+        # Prepare UCS path highlight
+        current_node = self.ucs_game.current
+        goal_node = self.ucs_game.goal
+        cost, path_nodes = self.ucs_game.uniform_cost_search(current_node, goal_node)
+        path_set = {n.name for n in path_nodes}
+        # Build fast index for consecutive pairs
+        consecutive_pairs = set()
+        for i in range(len(path_nodes)-1):
+            a = path_nodes[i].name; b = path_nodes[i+1].name
+            consecutive_pairs.add(tuple(sorted((a,b))))
+
+        # Draw edges (UCS graph based on doors)
+        drawn = set()
+        for node_name, node_obj in self.ucs_game.nodes.items():
+            for nb, _c in [v for v in node_obj.doors.values()]:
+                a = tuple(sorted((node_name, nb.name)))
+                if a in drawn: continue
+                drawn.add(a)
+                if node_name not in layout or nb.name not in layout: continue
+                x1, y1 = layout[node_name]
+                x2, y2 = layout[nb.name]
+                # transform into panel coords
+                x1 += panel_x + pad//2 - min_x
+                y1 += panel_y + pad//2 - min_y
+                x2 += panel_x + pad//2 - min_x
+                y2 += panel_y + pad//2 - min_y
+                base_col = (80,95,115)
+                if a in consecutive_pairs:
+                    base_col = (160, 210, 255)
+                pygame.draw.line(self.screen, base_col, (x1,y1), (x2,y2), 3 if a in consecutive_pairs else 2)
+
+        # Draw nodes with danger/trap coloring
+        for node_name, (lx, ly) in layout.items():
+            x = lx + panel_x + pad//2 - min_x
+            y = ly + panel_y + pad//2 - min_y
+            rect = pygame.Rect(0,0,34,24); rect.center = (x,y)
+            node = self.ucs_game.nodes.get(node_name)
+            if not node:
+                fill = (70,70,70)
+            else:
+                # base fill by danger cost
+                dc = max(1, min(10, node.danger_cost))
+                # map cost 1..10 to 0..1
+                t = (dc-1)/9
+                # gradient blue (safe) -> red (danger)
+                r = int(60 + t*160)
+                g = int(140 - t*60)
+                b = int(200 - t*140)
+                fill = (r,g,b)
+                if node.trap:
+                    fill = (200,60,60)
+            # overrides for special nodes
+            if node_name == current_node.name:
+                fill = (90,220,120)
+            if node_name == goal_node.name:
+                fill = (255,200,90)
+            pygame.draw.rect(self.screen, fill, rect, border_radius=6)
+            outline_col = (30,30,36)
+            if node_name in path_set:
+                outline_col = (0,240,255)
+            pygame.draw.rect(self.screen, outline_col, rect, 2, border_radius=6)
+            label = node_name.replace('.json','').replace('room','R')
+            lbl = small.render(label, True, (15,15,18))
+            if lbl.get_width() > rect.width - 4:
+                label = label[:3]
+                lbl = small.render(label, True, (15,15,18))
+            self.screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
+        # Show total estimated cost text
+        info = small.render(f"cost≈{int(cost)}", True, (220,225,235))
+        self.screen.blit(info, (panel_rect.right - info.get_width() - 8, panel_rect.bottom - info.get_height() - 6))
+
     # ------------ flow ------------
     def _enter_room(self, target_room_name: str, target_door_index: int, source_room: str):
         """Enter target_room_name from source_room.
@@ -471,6 +706,11 @@ class Game:
         # we only clear the flag once the player actually moves away.
         self.just_entered_room = True
         self._entry_spawn_center = tuple(self.player.rect.center)
+        # Track visited rooms
+        self.visited_rooms.add(cur_room_name)
+        # Rebuild layout if a previously unknown room got appended mid-game
+        if cur_room_name not in self._room_graph_layout:
+            self._build_room_graph_layout()
 
 
     def _place_player_after_enter(self, is_back: bool, door_index: int):
@@ -500,29 +740,7 @@ class Game:
             # defeat the boss in room12 to finish the game. Instead of instantly
             # flipping to Game Over when a room is marked as a trap, apply damage
             # scaled by the node's danger_cost so the player only dies if HP hits 0.
-            if hasattr(self, "ucs_game") and self.ucs_game.nodes.get(self.rooms[self.cur]):
-                node = self.ucs_game.nodes[self.rooms[self.cur]]
-                if node.trap:
-                    # use a modest damage derived from danger_cost so entering a trap
-                    # doesn't instantly kill a full-health player. Scale down the
-                    # node danger_cost (e.g. divide) and clamp to at least 1.
-                    try:
-                        damage = max(1, int(node.danger_cost / 4))
-                    except Exception:
-                        damage = max(1, HAZARD_DAMAGE)
-
-                    # apply damage and show hurt feedback from the door center
-                    self.player.take_damage(damage)
-                    try:
-                        self.player.hurt_from((cx, cy_front))
-                    except Exception:
-                        # fallback to player's center if door coords missing
-                        self.player.hurt_from(self.player.rect.center)
-                    # only trigger normal death sequence if hp <= 0 (preserve invuln flow)
-                    if self.player.hp <= 0 and not getattr(self.player, "dead", False):
-                        if hasattr(self.player, "kill_instant"):
-                            self.player.kill_instant()
-                        self._start_death_sequence()
+            # (Removed trap entry damage – high danger rooms are now informational only)
         else:
             sx, sy = self.room.get_spawn_point()
             self.player.rect.center = (sx, sy)
@@ -725,6 +943,11 @@ class Game:
                 continue
             else:
                 self.confirm.handle_event(ev)
+                if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                    if self.map_button_rect.collidepoint(ev.pos):
+                        self.show_map_graph = not self.show_map_graph
+                    elif self.ucs_button_rect.collidepoint(ev.pos):
+                        self.show_ucs_graph = not self.show_ucs_graph
 
         if not self.confirm.active and not self.game_over:
             self.player.update(dt, self.room)
@@ -818,8 +1041,9 @@ class Game:
             self._draw_door_id_overlay(off)
         self._draw_bomb_effect(off)
         self._draw_health_bar()
-
-        #draw UCS
+        self._draw_map_graph()
+        self._draw_ucs_graph()
+        # draw UCS + current room name
         self._draw_ucs_path()  # now shows top-right
         self._draw_current_room_name()
 
