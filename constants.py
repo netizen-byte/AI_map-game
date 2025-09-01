@@ -26,3 +26,7 @@ LAMP_TILE_GIDS = {78}   # e.g. {312, 313}  ← put your torch GIDs here
 TRAP_TILE_GIDS = {82}
 
 ANIM_FPS = 8
+ 
+# Boss tuning
+# Damage the boss inflicts on the player when its attack animation connects.
+BOSS_ATTACK_DAMAGE = 2

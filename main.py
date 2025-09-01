@@ -127,10 +127,44 @@ class StoryScene(BaseScene):
 
 
 class TutorialScene(BaseScene):
+    def __init__(self, screen):
+        super().__init__(screen)
+        # Animated player demo setup
+        from player import Player
+        self._demo_center = (SCREEN_W // 2, 420)
+        self._demo_player = Player(self._demo_center)
+        self._demo_cycle = ["down", "left", "up", "right"]
+        self._demo_index = 0
+        self._demo_timer = 0.0
+        self._demo_interval = 0.6
+        self._demo_walk_timer = 0.0
+        self._demo_walk_step = 0.14
+
     def handle_event(self, ev):
         if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_SPACE):
             self.done = True
             self.next_scene = "GAMEPLAY"
+
+    def update(self, dt: float):
+        # Animate facing direction
+        self._demo_timer += dt
+        if self._demo_timer >= self._demo_interval:
+            self._demo_timer -= self._demo_interval
+            self._demo_index = (self._demo_index + 1) % len(self._demo_cycle)
+            new_face = self._demo_cycle[self._demo_index]
+            state = f"walk_{new_face}" if f"walk_{new_face}" in self._demo_player.anim else f"idle_{new_face}"
+            self._demo_player.state = state
+            self._demo_player.facing = new_face
+            self._demo_player.frame = 0
+            self._demo_player.timer = 0.0
+        # Animate walk frames
+        self._demo_walk_timer += dt
+        if self._demo_walk_timer >= self._demo_walk_step:
+            self._demo_walk_timer -= self._demo_walk_step
+            frames = self._demo_player.anim.get(self._demo_player.state, [self._demo_player.image])
+            if len(frames) > 1:
+                self._demo_player.frame = (self._demo_player.frame + 1) % len(frames)
+                self._demo_player.image = frames[self._demo_player.frame]
 
     def draw(self):
         self.screen.fill((18, 22, 28))
@@ -151,6 +185,20 @@ class TutorialScene(BaseScene):
             surf = self.small.render("• " + t, True, (230, 235, 245))
             self.screen.blit(surf, (80, y))
             y += 32
+
+        # Animated player demo panel (centered below instructions)
+        panel_y = y + 20
+        panel_h = 120
+        panel_rect = pygame.Rect(SCREEN_W//2 - 60, panel_y, 120, panel_h)
+        # Use same background color, no outline
+        pygame.draw.rect(self.screen, (18, 22, 28), panel_rect, border_radius=10)
+        # Direction label
+        dir_labels = ["Down","Left","Up","Right"]
+        label = self.small.render(dir_labels[self._demo_index], True, (255, 240, 150))
+        self.screen.blit(label, (panel_rect.centerx - label.get_width()//2, panel_rect.y + 8))
+        # Draw player sprite
+        img = self._demo_player.image
+        self.screen.blit(img, (panel_rect.centerx - img.get_width()//2, panel_rect.centery - img.get_height()//2 + 18))
 
         hint = self.small.render("Press Enter to start", True, (220, 225, 235))
         self._center(hint, SCREEN_H - 60)
