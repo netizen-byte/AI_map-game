@@ -63,7 +63,7 @@ class UCSGame:
         if danger_cost >= 5:
             return "You are lack of aura, go farm more. This room is not for you"
         elif danger_cost >= 3:
-            return "You aura is not on my level yet, be sligyhtly careful"
+            return "You aura is not on my level yet, be slightly careful"
         elif danger_cost >= 2:
             return "You are almost there, you mogged most of the people"
         else:

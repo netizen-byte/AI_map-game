@@ -671,7 +671,7 @@ class Game:
                 lbl = small.render(label, True, (15,15,18))
             self.screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
         # Show total estimated cost text
-        info = small.render(f"cost≈{int(cost)}", True, (220,225,235))
+        info = small.render(f"cost: {int(cost)}", True, (220,225,235))
         self.screen.blit(info, (panel_rect.right - info.get_width() - 8, panel_rect.bottom - info.get_height() - 6))
 
     # ------------ flow ------------

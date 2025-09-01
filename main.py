@@ -83,10 +83,10 @@ class StoryScene(BaseScene):
         self.page = 0
         self.pages = [
             "The library fell silent when the vault door cracked open. A map of twelve rooms, "
-            "inked in a script older than the city, promised treasure—and something that shouldn’t wake.",
+            "inked in a script older than the city, promised treasure—and something that shouldn’t wake."
 
             "You took the key anyway. Now the halls shift underfoot; some doors lead forward, others back. "
-            "Some rooms are safe. One is not. The only way is through.",
+            "Some rooms are safe. One is not. The only way is through."
 
             "Legends say the final chamber houses a guardian. If it falls, the maze sleeps again. "
             "If you fall, the maze keeps your name."
@@ -94,14 +94,12 @@ class StoryScene(BaseScene):
 
     def handle_event(self, ev):
         if ev.type == pygame.KEYDOWN:
-            if ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_RIGHT):
+            if ev.key in (pygame.K_RETURN, pygame.K_SPACE):
                 if self.page < len(self.pages) - 1:
                     self.page += 1
                 else:
                     self.done = True
                     self.next_scene = TutorialScene(self.screen)
-            elif ev.key in (pygame.K_LEFT, pygame.K_BACKSPACE):
-                self.page = max(0, self.page - 1)
             elif ev.key == pygame.K_ESCAPE:
                 self.done = True
                 self.next_scene = TutorialScene(self.screen)
@@ -119,7 +117,7 @@ class StoryScene(BaseScene):
             self.screen.blit(surf, (margin_x, y))
             y += surf.get_height() + 6
 
-        foot = self.small.render("LEFT / RIGHT to navigate • Enter to continue • Esc to skip", True, (190, 195, 210))
+        foot = self.small.render("Enter to continue • Esc to skip", True, (190, 195, 210))
         self._center(foot, SCREEN_H - 60)
 
 
@@ -137,9 +135,10 @@ class TutorialScene(BaseScene):
         lines = [
             "Move: WASD or Arrow Keys",
             "Attack: Space (when weapon ready)",
-            "Interact / Confirm at doors: Enter / Y / E",
-            "Cancel a choice: N / Esc / Backspace",
+            "Interact / Confirm at doors: Y",
+            "Cancel a choice: N",
             "Goal: Reach the final room and defeat the boss",
+            "Reset: R",
             "UI: Click the buttons near the top-left to toggle Map and UCS path panels",
         ]
         y = 150
