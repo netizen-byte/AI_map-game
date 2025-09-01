@@ -770,124 +770,64 @@ class Game:
             self.player.rect.center = (sx, sy)
 
     def _spawn_after_entry(self, door_index: int, is_back: bool):
-        """Contextual spawn handling for forward/back travel.
-
-        Forward: always spawn in front of door.
-        Back: if door is at bottom edge -> spawn inside (above) door.
-              if door is at top edge -> spawn in front (below) door (so player not outside).
-              otherwise fallback to inside placement.
-        Also sets a temporary _door_block_rect to avoid instant re-trigger.
         """
+        Forward: spawn in front of the door (inside the room).
+        Back: place just inside the room relative to the door orientation.
+        Always clamp to room bounds and fall back to a safe spawn if needed.
+        """
+        # Guard: invalid index → safe spawn
         if door_index < 0 or door_index >= len(self.room.door_cells):
-            # Fallback to generic spawn
-            sx, sy = self.room.get_spawn_point()
+            sx, sy = self.room.get_spawn_point(prefer_back=is_back)
             self.player.rect.center = (sx, sy)
             return
-        dx, dy = self.room.door_cells[door_index]
-        h_tiles = self.room.pixel_size[1] // TILE
+
+        rw, rh = self.room.pixel_size
+        pw, ph = self.player.rect.width, self.player.rect.height
+        door_rect = self.room.door_rects()[door_index]
+
+        def clamp(px, py):
+            # keep the center within room interior
+            px = max(pw // 2, min(rw - (pw // 2) - 1, int(px)))
+            py = max(ph // 2, min(rh - (ph // 2) - 1, int(py)))
+            return px, py
 
         if not is_back:
-            # For forward travel, spawn in front of the door
+            # Use existing "front of door" code (already handles bottom-edge doors)
             self._spawn_at_door_front(door_index)
+            # Clamp anyway for safety
+            cx, cy = clamp(*self.player.rect.center)
+            self.player.rect.center = (cx, cy)
         else:
-            # Place player just outside the door in the direction away from
-            # the door surface so they don't spawn overlapping the door.
-            door_rect = self.room.door_rects()[door_index]
-            pw, ph = self.player.rect.width, self.player.rect.height
-            rw, rh = self.room.pixel_size
-            placed = False
-
-            # horizontal door (top/bottom)
+            # Place just inside the room depending on door orientation/side
             if door_rect.width >= door_rect.height:
+                # Horizontal door (top/bottom)
                 if door_rect.centery < rh / 2:
-                    # top door -> place below (inside room)
+                    # Top door → place below it (inside)
                     px = door_rect.centerx
                     py = door_rect.bottom + ph // 2 + 4
                 else:
-                    # bottom door -> place above (inside room)
+                    # Bottom door → place above it (inside)
                     px = door_rect.centerx
                     py = door_rect.top - ph // 2 - 4
-                self.player.rect.center = (int(px), int(py))
-                placed = True
             else:
-                # vertical door (left/right)
+                # Vertical door (left/right)
                 if door_rect.centerx < rw / 2:
-                    # left -> place to the right
+                    # Left door → place to the right (inside)
                     px = door_rect.right + pw // 2 + 4
                 else:
-                    # right -> place to the left
+                    # Right door → place to the left (inside)
                     px = door_rect.left - pw // 2 - 4
                 py = door_rect.centery
-                self.player.rect.center = (int(px), int(py))
-                placed = True
 
-            # Collision safety: if placed spot intersects solids or wasn't placed,
-            # fallback to the room spawn point.
-            if placed:
-                test = self.player.rect.copy()
-                if any(test.colliderect(s) for s in self.room.solids):
-            #
-            # Option G - "Path chain (1 -> 2 -> 3 -> 4 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12)"
-            # - Uses distinct indices so every mapping is reversible (A:i <-> B:j).
-            # - Every door index present in the maps is given a destination.
-            # - room1 is the start, room12 is the goal and only room12:0 is used.
-            # alt_door_graph_G = {
-            #     "room1.json": {0: ("room2.json", 0)},
-            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room5.json", 0)},
-            #     "room3.json": {0: ("room2.json", 1), 1: ("room4.json", 0)},
-            #     "room4.json": {0: ("room3.json", 1), 1: ("room6.json", 0)},
-            #     "room5.json": {0: ("room2.json", 2)},
-            #     "room6.json": {0: ("room4.json", 1), 1: ("room7.json", 0)},
-            #     "room7.json": {0: ("room6.json", 1), 1: ("room8.json", 0), 2: ("room11.json", 1)},
-            #     "room8.json": {0: ("room7.json", 1), 1: ("room9.json", 0)},
-            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
-            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
-            #     "room11.json": {0: ("room10.json", 1), 1: ("room7.json", 2), 2: ("room12.json", 0)},
-            #     "room12.json": {0: ("room11.json", 2)},
-            # }
-            #
-            # Option H - "Same path as G but alternate leftover pairings"
-            # - Keeps the main path (room1->...->room12) but pairs spare doors differently.
-            # alt_door_graph_H = {
-            #     "room1.json": {0: ("room2.json", 0)},
-            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room11.json", 1)},
-            #     "room3.json": {0: ("room2.json", 1), 1: ("room4.json", 0)},
-            #     "room4.json": {0: ("room3.json", 1), 1: ("room6.json", 0)},
-            #     "room5.json": {0: ("room7.json", 2)},
-            #     "room6.json": {0: ("room4.json", 1), 1: ("room7.json", 0)},
-            #     "room7.json": {0: ("room6.json", 1), 1: ("room8.json", 0), 2: ("room5.json", 0)},
-            #     "room8.json": {0: ("room7.json", 1), 1: ("room9.json", 0)},
-            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
-            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
-            #     "room11.json": {0: ("room10.json", 1), 1: ("room2.json", 2), 2: ("room12.json", 0)},
-            #     "room12.json": {0: ("room11.json", 2)},
-            # }
-            #
-            # Option I - "Alternate route (1 -> 2 -> 3 -> 7 -> 11 -> 12) with remaining doors paired"
-            # - Another chain that reaches room12 and keeps all links reversible.
-            # alt_door_graph_I = {
-            #     "room1.json": {0: ("room2.json", 0)},
-            #     "room2.json": {0: ("room1.json", 0), 1: ("room3.json", 0), 2: ("room4.json", 0)},
-            #     "room3.json": {0: ("room2.json", 1), 1: ("room7.json", 0)},
-            #     "room4.json": {0: ("room2.json", 2), 1: ("room5.json", 0)},
-            #     "room5.json": {0: ("room4.json", 1)},
-            #     "room6.json": {0: ("room6.json", 1), 1: ("room6.json", 0)},
-            #     "room7.json": {0: ("room3.json", 1), 1: ("room11.json", 2), 2: ("room8.json", 0)},
-            #     "room8.json": {0: ("room7.json", 2), 1: ("room9.json", 0)},
-            #     "room9.json": {0: ("room8.json", 1), 1: ("room10.json", 0)},
-            #     "room10.json": {0: ("room9.json", 1), 1: ("room11.json", 0)},
-            #     "room11.json": {0: ("room10.json", 1), 1: ("room2.json", 2), 2: ("room12.json", 0)},
-            #     "room12.json": {0: ("room11.json", 2)},
-            # }
-                    sx, sy = self.room.get_spawn_point()
-                    self.player.rect.center = (sx, sy)
-            else:
-                sx, sy = self.room.get_spawn_point()
-                self.player.rect.center = (sx, sy)
+            px, py = clamp(px, py)
+            self.player.rect.center = (px, py)
 
-        # After spawning, block re-trigger until player steps away
-        door_rect = self.room.door_rects()[door_index]
-        self._door_block_rect = door_rect.inflate(-TILE // 4, -TILE // 4)
+        # Final collision safety: if intersecting any solid, fall back to safe spawn
+        test = self.player.rect.copy()
+        if any(test.colliderect(s) for s in self.room.solids):
+            sx, sy = self.room.get_spawn_point(prefer_back=is_back)
+            self.player.rect.center = (sx, sy)
+
 
     def _check_door_trigger(self):
 
