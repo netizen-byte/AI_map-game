@@ -38,17 +38,26 @@ class BaseScene:
         self.screen.blit(surf, (self.screen.get_width()//2 - surf.get_width()//2, y))
 
     def _wrap_lines(self, text: str, font: pygame.font.Font, max_w: int):
-        words = text.split()
-        lines, cur = [], ""
-        for w in words:
-            test = (cur + " " + w).strip()
-            if font.size(test)[0] > max_w and cur:
-                lines.append(cur)
-                cur = w
-            else:
-                cur = test
-        if cur: lines.append(cur)
-        return lines
+        # Respect explicit newlines: split into paragraphs first, then wrap each
+        paragraphs = text.split("\n")
+        out_lines = []
+        for para in paragraphs:
+            if not para.strip():
+                # Preserve intentional blank lines
+                out_lines.append("")
+                continue
+            words = para.split()
+            cur = ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                if font.size(test)[0] > max_w and cur:
+                    out_lines.append(cur)
+                    cur = w
+                else:
+                    cur = test
+            if cur:
+                out_lines.append(cur)
+        return out_lines
 
 
 class TitleScene(BaseScene):
@@ -87,15 +96,22 @@ class StoryScene(BaseScene):
         super().__init__(screen)
         self.page = 0
         self.pages = [
-            "The library fell silent when the vault door cracked open. A map of twelve rooms, "
-            "inked in a script older than the city, promised treasure—and something that shouldn’t wake."
-
-            "You took the key anyway. Now the halls shift underfoot; some doors lead forward, others back. "
-            "Some rooms are safe. One is not. The only way is through."
-
-            "Legends say the final chamber houses a guardian. If it falls, the maze sleeps again. "
-            "If you fall, the maze keeps your name."
+            (
+                "One day, the world cracked. From the skies bled ruin, and the earth itself howled.\n"
+                "Every awakened soul was dragged into the Tower of Calamity—twelve floors etched in blood and myth.\n"
+                "Only those who slay the guardians within can shield the dying world outside.\n\n"
+                "Among them was a student no prophecy ever mentioned: an international computer engineering kid from KMITL.\n"
+                "The Tower spat out his title—Hunter, Rank F. F for failure, F for forgotten.\n"
+                "It matched his grades perfectly, but this time he swore the story wouldn’t end the same.\n\n"
+                "The halls bend like code gone mad; doors lead to rooms that shift with every breath.\n"
+                "Some are safe, most are not. The only way forward is through.\n"
+                "If the guardian of the final chamber falls, the Tower sleeps again.\n"
+                "If he falls, the Tower devours his name, as it has devoured countless before.\n\n"
+                "They call it the Chronicle of Ashes, but he will carve another ending.\n"
+                "This world won’t collapse like his GPA. This time, the grade is survival."
+            )
         ]
+
 
     def handle_event(self, ev):
         if ev.type == pygame.KEYDOWN:
@@ -114,12 +130,17 @@ class StoryScene(BaseScene):
         head = self.mid.render("Prologue", True, (255, 230, 150))
         self._center(head, 80)
 
-        margin_x = 80
-        max_w = SCREEN_W - margin_x*2
+        # Center wrapped lines
+        max_w = int(SCREEN_W * 0.78)  # limit wrap width to readable column
+        lines = self._wrap_lines(self.pages[self.page], self.small, max_w)
         y = 170
-        for line in self._wrap_lines(self.pages[self.page], self.small, max_w):
+        for line in lines:
+            if line == "":
+                y += self.small.get_height()  # blank line spacing
+                continue
             surf = self.small.render(line, True, (230, 232, 240))
-            self.screen.blit(surf, (margin_x, y))
+            x = SCREEN_W // 2 - surf.get_width() // 2
+            self.screen.blit(surf, (x, y))
             y += surf.get_height() + 6
 
         foot = self.small.render("Enter to continue • Esc to skip", True, (190, 195, 210))
