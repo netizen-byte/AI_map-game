@@ -318,12 +318,26 @@ class Game:
                 danger_cost = random.randint(1,5); trap = False
             self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=trap)
             if room_name == trap_room:
-                print(f"this is trap room: {trap_room} with danger cost {danger_cost}")
+                print(f"Trap Room: {trap_room} Danger Cost: {danger_cost}")
+            else:
+                print(f"Room: {room_name} Cost: {danger_cost}")
         for src_room_name, mappings in self.door_graph.items():
             if src_room_name in self.ucs_nodes:
                 for local_idx, (dst_room_name, _) in mappings.items():
                     if dst_room_name in self.ucs_nodes:
-                        self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=1)
+                        
+                        #use edge cost for random
+                        edge_cost = random.randint(1, 5)
+                        self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=edge_cost)
+                        #edge cost between rooms is constant and not cyclable
+        
+        #shows edge cost in terminal from to room
+        print("\n--- Edge Costs for All Doors ---")
+        for room_name, node in self.ucs_nodes.items():
+            for door_name, (neighbor, cost) in node.doors.items():
+                print(f"{room_name} -> {neighbor.name} | Door: {door_name} | Edge Cost: {cost} | Danger Cost: {neighbor.danger_cost}")
+            print("")
+
         start_node_name = room_json
         if "room12.json" in self.rooms:
             goal_node_name = "room12.json"
