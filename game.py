@@ -8,6 +8,7 @@ from room_map import RoomMap
 from player import Player
 
 from UCS import ucs_new
+import A_star
 
 from boss import Boss
 
@@ -220,10 +221,10 @@ class Game:
         # --- Randomly choose one of the prepared door_graph variants at startup ---
         variants = {
             "A": self.door_graph_A,
-            "B": self.door_graph_B,
-            "C": self.door_graph_C,
-            "D": self.door_graph_D,
-            "E": self.door_graph_E,
+            # "B": self.door_graph_B,
+            # "C": self.door_graph_C,
+            # "D": self.door_graph_D,
+            # "E": self.door_graph_E,
         }
         chosen_key = random.choice(list(variants.keys()))
         self.door_graph = variants[chosen_key]
@@ -305,45 +306,96 @@ class Game:
         self.ucs_button_rect = _pg.Rect(self.map_button_rect.right + 8, 42, 28, 22)
         self._build_room_graph_layout()
 
-        # ------------- UCS Integration Starts Here -------------
-        self.ucs_nodes = {}
-        trap_candidates = [r for r in self.rooms if r != room_json and r != "room12.json"]
-        if not trap_candidates:
-            trap_candidates = [r for r in self.rooms if r != room_json]
-        trap_room = random.choice(trap_candidates) if trap_candidates else None
-        for room_name in self.rooms:
-            if trap_room is not None and room_name == trap_room:
-                danger_cost = 10; trap = True
-            else:
-                danger_cost = random.randint(1,5); trap = False
-            self.ucs_nodes[room_name] = ucs_new.Node(room_name, danger_cost=danger_cost, trap=trap)
-            if room_name == trap_room:
-                print(f"Trap Room: {trap_room} Danger Cost: {danger_cost}")
-            else:
-                print(f"Room: {room_name} Cost: {danger_cost}")
-        for src_room_name, mappings in self.door_graph.items():
-            if src_room_name in self.ucs_nodes:
-                for local_idx, (dst_room_name, _) in mappings.items():
-                    if dst_room_name in self.ucs_nodes:
-                        
-                        #use edge cost for random
-                        edge_cost = random.randint(1, 5)
-                        self.ucs_nodes[src_room_name].add_door(f"door_{local_idx}", self.ucs_nodes[dst_room_name], cost=edge_cost)
-                        #edge cost between rooms is constant and not cyclable
-        
-        #shows edge cost in terminal from to room
-        print("\n--- Edge Costs for All Doors ---")
-        for room_name, node in self.ucs_nodes.items():
-            for door_name, (neighbor, cost) in node.doors.items():
-                print(f"{room_name} -> {neighbor.name} | Door: {door_name} | Edge Cost: {cost} | Danger Cost: {neighbor.danger_cost}")
-            print("")
+        # ---------------- Shared Graph Generation ----------------
+        self.shared_nodes = {}
 
+        # Pick trap room
+        trap_candidates = [r for r in self.rooms if r != room_json and r != "room12.json"]
+        trap_room = random.choice(trap_candidates) if trap_candidates else None
+
+        # Step 1: Generate nodes with danger costs and traps
+        for room_name in self.rooms:
+            if room_name == trap_room:
+                danger_cost, trap = 10, True
+            else:
+                danger_cost, trap = random.randint(1,5), False
+            self.shared_nodes[room_name] = A_star.Node(room_name, danger_cost=danger_cost, trap=trap)
+
+        # Step 2: Generate unique coordinates for all rooms
+        used_coords = set()
+        def generate_unique_coord():
+            while True:
+                x, y = random.randint(0,12), random.randint(0,12)
+                if (x, y) not in used_coords:
+                    used_coords.add((x,y))
+                    return x, y
+
+        for node in self.shared_nodes.values():
+            node.x, node.y = generate_unique_coord()
+
+        # Step 3: Assign edge costs based on coordinates
+        for src, mappings in self.door_graph.items():
+            if src in self.shared_nodes:
+                for local_idx, (dst, _) in mappings.items():
+                    if dst in self.shared_nodes:
+                        src_node = self.shared_nodes[src]
+                        dst_node = self.shared_nodes[dst]
+
+                        # Edge cost = Euclidean distance
+                        edge_cost = round(((src_node.x - dst_node.x)**2 + (src_node.y - dst_node.y)**2)**0.5, 2)
+
+                        # Alternatively: Manhattan distance
+                        # edge_cost = abs(src_node.x - dst_node.x) + abs(src_node.y - dst_node.y)
+
+                        self.shared_nodes[src].add_door(f"door_{local_idx}", dst_node, cost=edge_cost)
+
+        # Decide start and goal
         start_node_name = room_json
-        if "room12.json" in self.rooms:
-            goal_node_name = "room12.json"
+        goal_node_name = "room12.json" if "room12.json" in self.rooms else None
+
+        # Optional: print trap info
+        print("\n--- Room Info ---")
+        for name, node in self.shared_nodes.items():
+            print(f"{name} | Trap: {node.trap} | Danger: {node.danger_cost} | Coord: ({node.x},{node.y})")
+
+        # Optional: print edge costs
+        print("\n--- Edge Costs ---")
+        for room_name, node in self.shared_nodes.items():
+            for door_name, (neighbor, cost) in node.doors.items():
+                print(f"{room_name} -> {neighbor.name} | Door: {door_name} | Edge Cost: {cost:.2f} | Danger: {neighbor.danger_cost}")
+        print("")
+
+        # ---------------- UCS Integration ----------------
+        self.ucs_nodes = self.shared_nodes
         self.ucs_game = ucs_new.UCSGame(self.ucs_nodes, start_node_name, goal_node_name)
-        print(self.ucs_game.get_least_cost_to_goal())
-        # ------------- UCS Integration Ends Here -------------
+        ucs_cost, ucs_path = self.ucs_game.uniform_cost_search(self.ucs_nodes[start_node_name], self.ucs_nodes[goal_node_name])
+
+        print("=== UCS ===")
+        print("Cost:", ucs_cost)
+        print("Path:", [n.name for n in ucs_path])
+
+        # ---------------- A* Integration ----------------
+        # Copy nodes for A* so coordinates & heuristics are independent
+        self.astar_nodes = {}
+        for name, node in self.shared_nodes.items():
+            new_node = A_star.Node(name, node.danger_cost, trap=node.trap, x=node.x, y=node.y)
+            new_node.doors = node.doors.copy()  # copy edges
+            self.astar_nodes[name] = new_node
+
+        for name, node in self.shared_nodes.items():
+            for door_name, (neighbor, cost) in node.doors.items():
+                self.astar_nodes[name].add_door(door_name, self.astar_nodes[neighbor.name], cost)
+
+        # Run A*
+        self.a_star_game = A_star.A_star_game(self.astar_nodes, start_node_name, goal_node_name)
+        a_cost, a_path = self.a_star_game.search()
+
+        print("\n=== A* ===")
+        print("Cost:", a_cost)
+        print("Path:", [n.name for n in a_path])
+        for n in a_path:
+            print(f"{n.name} | Coord: ({n.x},{n.y}) | Heuristic: {n.heuristic:.2f} | Danger: {n.danger_cost}")
+
 
         # Misc gameplay state
         self._hazard_tick_accum = 0.0

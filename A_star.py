@@ -1,21 +1,23 @@
 from UCS import ucs_new
 import heapq
 import itertools
-import random
 
 # Use the same Node class as before
 class Node:
-    def __init__(self, name, danger_cost, trap=False):
+    def __init__(self, name, danger_cost, trap=False, x=0, y=0, heuristic=0):
         self.name = name
         self.doors = {}
         self.danger_cost = danger_cost
         self.trap = trap
+        self.x = x
+        self.y = y
+        self.heuristic = heuristic
 
     def add_door(self, door_name, node, cost):
         self.doors[door_name] = (node, cost)
 
     def __repr__(self):
-        return f"Node({self.name}, {self.danger_cost}, trap={self.trap})"
+        return f"Node({self.name}, x={self.x}, y={self.y}, heuristic={self.heuristic}, trap={self.trap})"
 
 
 # A* using UCS upper bound as heuristic
@@ -24,31 +26,22 @@ class A_star_game:
         self.nodes = nodes
         self.start = nodes[start_name]
         self.goal = nodes[goal_name]
-
-        # # Precompute UCS costs from every node to the goal
-        # self.ucs_costs = {}
-        # for node_name, node in nodes.items():
-        #     ucs_game = ucs_new.UCSGame(nodes, start_name=node_name, goal_name=self.goal.name)
-        #     cost, _ = ucs_game.uniform_cost_search(ucs_game.start, ucs_game.goal)
-        #     # Make heuristic slightly smaller than real UCS cost for diversity
-        #     self.ucs_costs[node_name] = max(0, cost - random.randint(0, 2))
-
-    def heuristic_biased(self, node):
-        self.ucs_costs = {}
-        for node_name, node in nodes.items():
-            ucs_game = ucs_new.UCSGame(nodes, start_name=node_name, goal_name=self.goal.name)
-            cost, _ = ucs_game.uniform_cost_search(ucs_game.start, ucs_game.goal)
-            # Make heuristic slightly smaller than real UCS cost for diversity
-            self.ucs_costs[node_name] = max(0, cost - random.randint(0, 0))        
-        return self.ucs_costs.get(node.name, float('inf'))
     
-    def heuristic_true(self, node):
-        return self.ucs_costs.get(node.name, float('inf'))
+    # def heuristic_euclidian(self, node):
+    #     for node in self.nodes.values():
+    #         h = ((node.x - self.goal.x) ** 2 + (node.y - self.goal.y) ** 2) ** 0.5
+    #         node.heuristic = round(h, 1)  # store in node
 
     def search(self):
+
+        for node in self.nodes.values():
+            h = ((node.x - self.goal.x) ** 2 + (node.y - self.goal.y) ** 2) ** 0.5
+            node.heuristic = round(h, 1)  # store in node
+
         frontier = []
         counter = itertools.count()
-        heapq.heappush(frontier, (0 + self.heuristic_biased(self.start), next(counter), self.start, 0, []))
+        # use stored heuristic
+        heapq.heappush(frontier, (0 + self.start.heuristic, next(counter), self.start, 0, []))
         visited = set()
 
         while frontier:
@@ -63,7 +56,7 @@ class A_star_game:
 
             for neighbor, edge_cost in current.doors.values():
                 new_g = g_score + neighbor.danger_cost + edge_cost
-                f = new_g + self.heuristic_biased(neighbor)
+                f = new_g + neighbor.heuristic  # use precomputed heuristic
                 heapq.heappush(frontier, (f, next(counter), neighbor, new_g, new_path))
 
         return float('inf'), []
@@ -71,13 +64,13 @@ class A_star_game:
 
 # ---------------- Example Graph ----------------
 
-# Nodes
-A = ucs_new.Node("A", danger_cost=1)
-B = ucs_new.Node("B", danger_cost=5)
-C = ucs_new.Node("C", danger_cost=2)
-D = ucs_new.Node("D", danger_cost=2)
-E = ucs_new.Node("E", danger_cost=1)
-F = ucs_new.Node("F", danger_cost=3)
+# Nodes with coordinates (x, y)
+A = Node("A", danger_cost=1, x=0, y=0)
+B = Node("B", danger_cost=5, x=2, y=0)
+C = Node("C", danger_cost=2, x=0, y=2)
+D = Node("D", danger_cost=2, x=2, y=2)
+E = Node("E", danger_cost=1, x=4, y=2)
+F = Node("F", danger_cost=3, x=2, y=4)
 
 # Edges (some have higher edge cost, some lower)
 A.add_door("to_B", B, 2)
@@ -103,3 +96,5 @@ a_cost, a_path = a_star_game.search()
 print("\n=== A* Path ===")
 print("Cost:", a_cost)
 print("Path:", [n.name for n in a_path])
+for n in a_path:
+    print(n)
