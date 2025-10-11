@@ -1,6 +1,7 @@
 from UCS import ucs_new
 import heapq
 import itertools
+from random import randint
 
 # Use the same Node class as before
 class Node:
@@ -27,17 +28,16 @@ class A_star_game:
         self.start = nodes[start_name]
         self.goal = nodes[goal_name]
 
-        self.current = self.start    
-    # def heuristic_euclidian(self, node):
-    #     for node in self.nodes.values():
-    #         h = ((node.x - self.goal.x) ** 2 + (node.y - self.goal.y) ** 2) ** 0.5
-    #         node.heuristic = round(h, 1)  # store in node
-
-    def search(self):
+        self.current = self.start
 
         for node in self.nodes.values():
             h = ((node.x - self.goal.x) ** 2 + (node.y - self.goal.y) ** 2) ** 0.5
             node.heuristic = round(h, 1)  # store in node
+
+            #inadmissible attempt (ignore)
+            # node.heuristic=randint(1,100) 
+
+    def search(self):
 
         frontier = []
         counter = itertools.count()
