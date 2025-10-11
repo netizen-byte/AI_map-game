@@ -221,10 +221,10 @@ class Game:
         # --- Randomly choose one of the prepared door_graph variants at startup ---
         variants = {
             "A": self.door_graph_A,
-            # "B": self.door_graph_B,
-            # "C": self.door_graph_C,
-            # "D": self.door_graph_D,
-            # "E": self.door_graph_E,
+            "B": self.door_graph_B,
+            "C": self.door_graph_C,
+            "D": self.door_graph_D,
+            "E": self.door_graph_E,
         }
         chosen_key = random.choice(list(variants.keys()))
         self.door_graph = variants[chosen_key]
@@ -301,9 +301,11 @@ class Game:
         self.visited_rooms = {self.rooms[self.cur]}
         self.show_map_graph = False
         self.show_ucs_graph = False
+        self.show_astar_graph = False
         import pygame as _pg  # safe alias
         self.map_button_rect = _pg.Rect(20, 42, 28, 22)
         self.ucs_button_rect = _pg.Rect(self.map_button_rect.right + 8, 42, 28, 22)
+        self.astar_button_rect = _pg.Rect(self.ucs_button_rect.right + 8, 42, 28, 22)
         self._build_room_graph_layout()
 
         # ---------------- Shared Graph Generation ----------------
@@ -404,42 +406,76 @@ class Game:
         self.win_screen = False
 
 
-    def display_UCS(self): 
+    # def display_UCS(self): 
+    #     cur_name = self.rooms[self.cur]
+    #     current_node = self.ucs_nodes.get(cur_name)
+    #     if not current_node:
+    #         return "Pathfinding data not available for this room."
+
+    #     # Call the UCS algorithm to get the shortest path and cost
+    #     cost, path = self.ucs_game.uniform_cost_search(current_node, self.ucs_game.goal)
+
+    #     #Also is a shortest path from current node to goal node
+    #     if cost == float("inf"):
+    #         return "There is no path to the goal from here."
+    #     else:
+    #         path_names = [n.name.replace(".json", "") for n in path]
+    #         path_str = "-> ".join(path_names)
+    #         return f"Safest path is: {path_str}."
+
+    # def _draw_ucs_path(self): #draw the string from function above to pygame screen
+    #     if not hasattr(self, "ucs_game") or not self.ucs_game:
+    #         return
+        
+    #     # Run UCS to get the available path (list of node/room names)
+    #     path = self.display_UCS()  # should return list of room names
+        
+    #     if not path:
+    #         return
+
+    #     small_font = pygame.font.Font(None, 24)
+    #     text = path  # e.g. room1.json → room2.json → room12.json
+    #     surf = small_font.render(text, True, (200, 240, 200))
+
+    #     # Position at top-right, 20px from edge
+    #     x = SCREEN_W - surf.get_width() - 20
+    #     y = 20  # just under the top edge
+    #     self.screen.blit(surf, (x, y))
+
+    def draw_room_info(self):
         cur_name = self.rooms[self.cur]
-        current_node = self.ucs_nodes.get(cur_name)
+        current_node = self.shared_nodes.get(cur_name)
         if not current_node:
-            return "Pathfinding data not available for this room."
+            return
 
-        # Call the UCS algorithm to get the shortest path and cost
-        cost, path = self.ucs_game.uniform_cost_search(current_node, self.ucs_game.goal)
+        font = pygame.font.Font(None, 28)
+        small_font = pygame.font.Font(None, 22)
+        line_height = 24
 
-        #Also is a shortest path from current node to goal node
-        if cost == float("inf"):
-            return "There is no path to the goal from here."
+        # Position (same as UCS info)
+        x, y = SCREEN_W - 250, 20  
+
+        # --- Current Room ---
+        current_text = font.render(f"Current Room: {cur_name.replace('.json', '')}", True, (255, 255, 255))
+        self.screen.blit(current_text, (x, y))
+        y += line_height
+
+        # --- Connected Rooms ---
+        connections = current_node.doors.items()
+        if connections:
+            header = small_font.render("Connected Rooms:", True, (200, 200, 200))
+            self.screen.blit(header, (x, y))
+            y += line_height
+
+            for door_name, (neighbor, cost) in connections:
+                color = (255, 140, 140) if neighbor.trap else (230, 230, 230)
+                conn_text = f"{neighbor.name.replace('.json', '')} | Edge: {cost:.1f} | Danger: {neighbor.danger_cost}"
+                conn_surf = small_font.render(conn_text, True, color)
+                self.screen.blit(conn_surf, (x + 10, y))
+                y += line_height
         else:
-            path_names = [n.name.replace(".json", "") for n in path]
-            path_str = "-> ".join(path_names)
-            return f"Safest path is: {path_str}."
-
-    def _draw_ucs_path(self): #draw the string from function above to pygame screen
-        if not hasattr(self, "ucs_game") or not self.ucs_game:
-            return
-        
-        # Run UCS to get the available path (list of node/room names)
-        path = self.display_UCS()  # should return list of room names
-        
-        if not path:
-            return
-
-        small_font = pygame.font.Font(None, 24)
-        text = path  # e.g. room1.json → room2.json → room12.json
-        surf = small_font.render(text, True, (200, 240, 200))
-
-        # Position at top-right, 20px from edge
-        x = SCREEN_W - surf.get_width() - 20
-        y = 20  # just under the top edge
-        self.screen.blit(surf, (x, y))
-
+            none_text = small_font.render("No connected rooms.", True, (180, 180, 180))
+            self.screen.blit(none_text, (x + 10, y))
 
 
     @property
@@ -558,7 +594,7 @@ class Game:
         # Draw toggle button
         btn_color = (70, 70, 90)
         pygame.draw.rect(self.screen, btn_color, self.map_button_rect, border_radius=5)
-        arrow = "▲" if self.show_map_graph else "▼"
+        arrow = "." if self.show_map_graph else "M"
         a_surf = small.render(arrow, True, (235,235,240))
         self.screen.blit(a_surf, (self.map_button_rect.centerx - a_surf.get_width()//2,
                                   self.map_button_rect.centery - a_surf.get_height()//2))
@@ -635,7 +671,7 @@ class Game:
         small = pygame.font.Font(None, 20)
         btn_color = (70,70,90)
         pygame.draw.rect(self.screen, btn_color, self.ucs_button_rect, border_radius=5)
-        arrow = "▲" if self.show_ucs_graph else "▼"
+        arrow = "." if self.show_ucs_graph else "UCS"
         surf = small.render(arrow, True, (235,235,240))
         self.screen.blit(surf, (self.ucs_button_rect.centerx - surf.get_width()//2,
                                  self.ucs_button_rect.centery - surf.get_height()//2))
@@ -725,6 +761,9 @@ class Game:
                 fill = (90,220,120)
             if node_name == goal_node.name:
                 fill = (255,200,90)
+            if node_name not in path_set:
+                fill = tuple(int(c * 0.35) for c in fill)
+
             pygame.draw.rect(self.screen, fill, rect, border_radius=6)
             outline_col = (30,30,36)
             if node_name in path_set:
@@ -739,6 +778,176 @@ class Game:
         # Show total estimated cost text
         info = small.render(f"cost: {int(cost)}", True, (220,225,235))
         self.screen.blit(info, (panel_rect.right - info.get_width() - 8, panel_rect.bottom - info.get_height() - 6))
+
+    def _draw_astar_graph(self):
+        if not hasattr(self, "a_star_game") or not self.a_star_game:
+            return
+
+        # --- A* Toggle Button ---
+        small = pygame.font.Font(None, 20)
+        btn_color = (70, 70, 90)
+        pygame.draw.rect(self.screen, btn_color, self.astar_button_rect, border_radius=5)
+        arrow = "." if self.show_astar_graph else "A*"
+        surf = small.render(arrow, True, (235, 235, 240))
+        self.screen.blit(
+            surf,
+            (
+                self.astar_button_rect.centerx - surf.get_width() // 2,
+                self.astar_button_rect.centery - surf.get_height() // 2,
+            ),
+        )
+
+        if not self.show_astar_graph:
+            self._astar_panel_rect = None
+            return
+
+        # --- Layout check ---
+        layout = getattr(self, "_room_graph_layout", {})
+        if not layout:
+            self._astar_panel_rect = None
+            return
+
+        pad = 50
+        xs = [p[0] for p in layout.values()]
+        ys = [p[1] for p in layout.values()]
+        if not xs or not ys:
+            self._astar_panel_rect = None
+            return
+
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        panel_w = (max_x - min_x) + pad
+        panel_h = (max_y - min_y) + pad
+
+        # --- Prevent overlap with UCS or map panels ---
+        offset = 12
+        map_rect = getattr(self, "_map_panel_rect", None)
+        ucs_rect = getattr(self, "_ucs_panel_rect", None)
+
+        if ucs_rect and map_rect:
+            # Both UCS and map panels visible → put A* to the right of UCS
+            panel_x = ucs_rect.right + offset
+            panel_y = ucs_rect.y
+        elif ucs_rect:
+            # Only UCS visible → put A* to the right of UCS
+            panel_x = ucs_rect.right + offset
+            panel_y = ucs_rect.y
+        elif map_rect:
+            # Only map panel visible → put A* to the right of map
+            panel_x = map_rect.right + offset
+            panel_y = map_rect.y
+        else:
+            # Neither visible → show below A* button
+            panel_x = self.astar_button_rect.x
+            panel_y = self.astar_button_rect.bottom + 4
+
+        # --- Panel Rect ---
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+        self._astar_panel_rect = panel_rect
+
+        pygame.draw.rect(self.screen, (26, 30, 38), panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (110, 120, 150), panel_rect, 2, border_radius=8)
+
+        # --- A* Path Highlighting ---
+        current_node = self.a_star_game.current
+        goal_node = self.a_star_game.goal
+
+        cost, path_nodes = self.a_star_game.search()
+        path_set = {n.name for n in path_nodes}
+        consecutive_pairs = {
+            tuple(sorted((path_nodes[i].name, path_nodes[i + 1].name)))
+            for i in range(len(path_nodes) - 1)
+        }
+
+        # --- Draw Edges ---
+        drawn = set()
+        for node_name, node_obj in self.a_star_game.nodes.items():
+            for nb, _c in [v for v in node_obj.doors.values()]:
+                a = tuple(sorted((node_name, nb.name)))
+                if a in drawn:
+                    continue
+                drawn.add(a)
+                if node_name not in layout or nb.name not in layout:
+                    continue
+
+                x1, y1 = layout[node_name]
+                x2, y2 = layout[nb.name]
+                x1 += panel_x + pad // 2 - min_x
+                y1 += panel_y + pad // 2 - min_y
+                x2 += panel_x + pad // 2 - min_x
+                y2 += panel_y + pad // 2 - min_y
+
+                base_col = (80, 95, 115)
+                if a in consecutive_pairs:
+                    base_col = (255, 190, 100)  # Warm gold/orange for A*
+                pygame.draw.line(
+                    self.screen, base_col, (x1, y1), (x2, y2),
+                    3 if a in consecutive_pairs else 2
+                )
+
+        # --- Draw Nodes ---
+        for node_name, (lx, ly) in layout.items():
+            x = lx + panel_x + pad // 2 - min_x
+            y = ly + panel_y + pad // 2 - min_y
+            rect = pygame.Rect(0, 0, 34, 24)
+            rect.center = (x, y)
+            node = self.a_star_game.nodes.get(node_name)
+
+            if not node:
+                fill = (70, 70, 70)
+            else:
+                dc = max(1, min(10, node.danger_cost))
+                t = (dc - 1) / 9
+                # gradient: cyan (safe) → purple (danger)
+                r = int(60 + t * 150)
+                g = int(200 - t * 160)
+                b = int(220 - t * 20)
+                fill = (r, g, b)
+                if node.trap:
+                    fill = (200, 60, 60)
+
+            # highlight current/goal
+            if node_name == current_node.name:
+                fill = (90, 220, 120)
+            if node_name == goal_node.name:
+                fill = (255, 210, 90)
+            if node_name not in path_set:
+                fill = tuple(int(c * 0.35) for c in fill)
+
+            pygame.draw.rect(self.screen, fill, rect, border_radius=6)
+
+            outline_col = (30, 30, 36)
+            if node_name in path_set:
+                outline_col = (255, 170, 50)
+            pygame.draw.rect(self.screen, outline_col, rect, 2, border_radius=6)
+
+            # label
+            label = "?" # Default label
+            if node:
+                # CORRECT: Access the 'heuristic' attribute, which is set in A_star.py
+                h_val = getattr(node, 'heuristic', None)
+                
+                if h_val is not None:
+                    label = f"{h_val:.1f}" # Format to one decimal place
+                else:
+                    # Fallback to room name if 'heuristic' isn't available for any reason
+                    label = node_name.replace(".json", "").replace("room", "R")
+
+            lbl = small.render(label, True, (15, 15, 18))
+            if lbl.get_width() > rect.width - 4:
+                label = label[:3]
+                lbl = small.render(label, True, (15, 15, 18))
+            self.screen.blit(
+                lbl,
+                (rect.centerx - lbl.get_width() // 2, rect.centery - lbl.get_height() // 2),
+            )
+
+        # --- Total cost text ---
+        info = small.render(f"cost: {int(cost)}", True, (240, 230, 220))
+        self.screen.blit(
+            info,
+            (panel_rect.right - info.get_width() - 8, panel_rect.bottom - info.get_height() - 6),
+        )
 
     # ------------ flow ------------
     def _enter_room(self, target_room_name: str, target_door_index: int, source_room: str):
@@ -961,8 +1170,12 @@ class Game:
                 if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                     if self.map_button_rect.collidepoint(ev.pos):
                         self.show_map_graph = not self.show_map_graph
-                    elif self.ucs_button_rect.collidepoint(ev.pos):
+                    if self.ucs_button_rect.collidepoint(ev.pos):
                         self.show_ucs_graph = not self.show_ucs_graph
+                    if self.astar_button_rect.collidepoint(ev.pos):
+                        self.show_astar_graph = not self.show_astar_graph
+                    self._handle_restart_click()
+
                 if ev.type == pygame.KEYDOWN and not self.confirm.active:
                     if ev.key == pygame.K_r:
                         msg = "Restart from room1 now?"
@@ -1059,12 +1272,19 @@ class Game:
 
         if self.show_door_ids:
             self._draw_door_id_overlay(off)
+
         self._draw_bomb_effect(off)
         self._draw_health_bar()
         self._draw_map_graph()
         self._draw_ucs_graph()
+        self._draw_astar_graph()
+
         # draw UCS + current room name
-        self._draw_ucs_path()  # now shows top-right
+        # self._draw_ucs_path()  # now shows top-right
+
+        #draw room name and connecting rooms
+        # self.draw_room_info()
+
         self._draw_current_room_name()
 
         self.confirm.draw(self.screen)
