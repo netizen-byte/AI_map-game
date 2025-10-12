@@ -586,6 +586,32 @@ class Game:
                 y = margin_y + lv * y_spacing
                 layout[rname] = (x, y)
         self._room_graph_layout = layout
+    def display_a_star(self) -> str:
+        # """Return the A* path from current room to goal as a string, including total cost."""
+        if not hasattr(self, "a_star_game") or not self.a_star_game:
+            return "A* pathfinding data not available."
+
+        cur_name = self.rooms[self.cur]
+        current_node = self.astar_nodes.get(cur_name)
+        if not current_node:
+            return "Current room not in A* nodes."
+
+        # Run A* search
+        total_cost, path = self.a_star_game.search()
+        if total_cost == float('inf') or not path:
+            return "There is no path to the goal from here."
+
+        path_names = [n.name.replace(".json", "") for n in path]
+        path_str = " -> ".join(path_names)
+        return f"A* safest path is: {path_str} | Total cost: {total_cost:.2f}"
+    
+    def _draw_a_star_path(self):
+        path_text = self.display_a_star()
+        small_font = pygame.font.Font(None, 24)
+        surf = small_font.render(path_text, True, (255, 215, 0))  # gold text
+        x = SCREEN_W - surf.get_width() - 20
+        y = 20
+        self.screen.blit(surf, (x, y))
 
     def _draw_map_graph(self):
         if not getattr(self, "map_button_rect", None):
@@ -1271,7 +1297,7 @@ class Game:
             self.screen.blit(self.player.image, self.player.rect.move(off))
 
         if self.show_door_ids:
-            self._draw_door_id_overlay(off)
+            self._draw_door_heuristic_overlay(off)
 
         self._draw_bomb_effect(off)
         self._draw_health_bar()
@@ -1280,7 +1306,7 @@ class Game:
         self._draw_astar_graph()
 
         # draw UCS + current room name
-        # self._draw_ucs_path()  # now shows top-right
+        self._draw_a_star_path()  # now shows top-right
 
         #draw room name and connecting rooms
         # self.draw_room_info()
@@ -1505,6 +1531,34 @@ class Game:
             pass
             self._restart_to_room1()
 
+    def _draw_door_heuristic_overlay(self, off: tuple[int,int]):
+        """Draw heuristic values centered on each door rectangle."""
+        try:
+            small = pygame.font.Font(None, 20)
+            cur_room_name = self.rooms[self.cur]
+            cur_node = self.astar_nodes.get(cur_room_name)
+
+            for i, r in enumerate(self.room.door_rects()):
+                dr = r.move(off)
+
+                # Draw door rectangle
+                pygame.draw.rect(self.screen, (255, 255, 0), dr, 1)
+
+                # Draw heuristic centered
+                if cur_node and i in self.door_graph.get(cur_room_name, {}):
+                    dst_name, _ = self.door_graph[cur_room_name][i]
+                    neighbor_node = self.astar_nodes.get(dst_name)
+                    if neighbor_node:
+                        h_text = f"{neighbor_node.heuristic:.1f}"
+                        h_tag = small.render(h_text, True, (0, 255, 255))  # cyan
+
+                        # Center text inside door rectangle
+                        text_x = dr.x + (dr.width - h_tag.get_width()) // 2
+                        text_y = dr.y + (dr.height - h_tag.get_height()) // 2
+                        self.screen.blit(h_tag, (text_x, text_y))
+        except Exception:
+            pass
+            self._restart_to_room1()
     def _restart_to_room1(self):
         try:
             pygame.event.clear()
