@@ -32,10 +32,12 @@ class A_star_game:
 
         for node in self.nodes.values():
             h = ((node.x - self.goal.x) ** 2 + (node.y - self.goal.y) ** 2) ** 0.5
-            node.heuristic = round(h, 1)  # store in node
+            rounded_h = round(h, 1)
+            node.heuristic = rounded_h  # store in node
 
-            #inadmissible attempt (ignore)
-            # node.heuristic=randint(1,100) 
+            #code that makes heuristics inadmissible
+            # inadmissible_h = h + randint(0, 100) # Add a random cost between 0 and 100
+            # node.heuristic = round(inadmissible_h, 1)
 
     def search(self):
 
